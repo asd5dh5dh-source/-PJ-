@@ -2,7 +2,6 @@ import csv
 from datetime import date, timedelta
 from pathlib import Path
 import sys
-import unicodedata
 from typing import Any, Callable
 
 import psycopg
@@ -44,24 +43,14 @@ BOOLEAN_COLUMNS = {"auto_close", "reactivated"}
 
 
 def resolve_catalog_name(names: list[str]) -> str:
-    exact = [name for name in names if name == EXPECTED_DATABASE]
-    if exact:
-        return exact[0]
-
-    expected = unicodedata.normalize("NFC", EXPECTED_DATABASE).strip()
-    matches = [
-        name for name in names if unicodedata.normalize("NFC", name).strip() == expected
-    ]
-    if len(matches) == 1:
-        return matches[0]
+    if EXPECTED_DATABASE in names:
+        return EXPECTED_DATABASE
 
     diagnostics = ", ".join(
         f"{name!r} length={len(name)} utf8_hex={name.encode('utf-8').hex()}"
         for name in names
     )
-    if not matches:
-        raise RuntimeError(f"No training database match. Catalog: {diagnostics}")
-    raise RuntimeError(f"Multiple training database matches. Catalog: {diagnostics}")
+    raise RuntimeError(f"No exact training database match. Catalog: {diagnostics}")
 
 
 def seed_action(row_count: int) -> str:

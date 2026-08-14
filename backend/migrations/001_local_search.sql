@@ -12,8 +12,8 @@ SET search_document = concat_ws(' ', customer_request, original_mail_body, full_
 WHERE search_document IS NULL;
 
 UPDATE public.voc_cases
-SET product_equipment = substring(customer_request from '(?i)(NCM811|NCM9|NCA|LMFP|LFP)')
-WHERE product_equipment IS NULL OR btrim(product_equipment) = '';
+SET product_equipment = substring(customer_request from E'(?i)\\m(NCM811|NCM9|NCA|LMFP|LFP)\\M')
+WHERE record_origin = 'historical';
 
 CREATE INDEX IF NOT EXISTS idx_voc_cases_received_at ON public.voc_cases (received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_voc_cases_filters ON public.voc_cases (voc_type, voc_subtype, final_status);

@@ -1,5 +1,6 @@
 from contextlib import nullcontext
 from pathlib import Path
+import re
 from types import SimpleNamespace
 import unicodedata
 
@@ -31,11 +32,12 @@ def test_catalog_resolution_prefers_exact_match():
     assert resolve_catalog_name([expected + " ", expected]) == expected
 
 
-def test_catalog_resolution_accepts_one_normalized_match():
+def test_catalog_resolution_rejects_normalized_but_non_exact_match():
     expected = expected_database_name()
     decomposed = unicodedata.normalize("NFD", expected) + " "
 
-    assert resolve_catalog_name([decomposed]) == decomposed
+    with pytest.raises(RuntimeError):
+        resolve_catalog_name([decomposed])
 
 
 @pytest.mark.parametrize("names", [["postgres"], ["학습용 Data ", "학습용 Data  "]])
@@ -211,12 +213,22 @@ def test_wrapper_contains_only_secure_python_bootstrap_path():
     assert "-m app.bootstrap_local_training_db" in wrapper
 
 
-def test_search_migration_extracts_product_without_escaped_boundaries():
+def test_search_migration_uses_postgres_word_boundaries_for_historical_rows():
     migration = SEARCH_MIGRATION.read_text("ascii")
 
     assert (
         "substring(customer_request from "
-        "'(?i)(NCM811|NCM9|NCA|LMFP|LFP)')"
+        "E'(?i)\\\\m(NCM811|NCM9|NCA|LMFP|LFP)\\\\M')"
     ) in migration
-    assert "\\\\m" not in migration
-    assert "WHERE product_equipment IS NULL OR btrim(product_equipment) = '';" in migration
+    assert "WHERE record_origin = 'historical';" in migration
+
+
+def test_product_pattern_matches_tokens_but_not_embedded_prefixes():
+    migration = SEARCH_MIGRATION.read_text("ascii")
+    assert "E'(?i)\\\\m(NCM811|NCM9|NCA|LMFP|LFP)\\\\M'" in migration
+
+    token_pattern = re.compile(r"(?i)\b(NCM811|NCM9|NCA|LMFP|LFP)\b")
+    assert token_pattern.search("Issue observed on NCM811 cathode").group(1) == "NCM811"
+    assert token_pattern.search("LMFP qualification").group(1) == "LMFP"
+    assert token_pattern.search("XNCM811Y") is None
+    assert token_pattern.search("preLFPgrade") is None
