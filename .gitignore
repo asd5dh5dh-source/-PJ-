@@ -1,0 +1,34 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+.venv/
+
+# Isolated agent workspaces
+.worktrees/
+.superpowers/
+
+# Python / Node caches and builds
+__pycache__/
+*.py[cod]
+.pytest_cache/
+node_modules/
+.next/
+test-results/
+
+# Generated dependency bundle
+work/pydeps/
+
+# Generated or heavyweight artifacts
+*.xlsx
+*.inspect.ndjson
+work/embeddings.json
+work/embedding_inputs.json
+work/source_previews/
+work/csv_previews/
+work/final_previews/
+work/pdf_qa/
+work/voc_test.csv
+
+# Local PostgreSQL configuration backup
+work/pg_hba.conf.before_db_upload
