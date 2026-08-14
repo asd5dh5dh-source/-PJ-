@@ -13,7 +13,8 @@ WHERE search_document IS NULL;
 
 UPDATE public.voc_cases
 SET product_equipment = substring(customer_request from E'(?i)\\m(NCM811|NCM9|NCA|LMFP|LFP)\\M')
-WHERE record_origin = 'historical';
+WHERE record_origin = 'historical'
+  AND (product_equipment IS NULL OR btrim(product_equipment) = '');
 
 CREATE INDEX IF NOT EXISTS idx_voc_cases_received_at ON public.voc_cases (received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_voc_cases_filters ON public.voc_cases (voc_type, voc_subtype, final_status);

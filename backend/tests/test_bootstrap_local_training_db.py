@@ -220,7 +220,10 @@ def test_search_migration_uses_postgres_word_boundaries_for_historical_rows():
         "substring(customer_request from "
         "E'(?i)\\\\m(NCM811|NCM9|NCA|LMFP|LFP)\\\\M')"
     ) in migration
-    assert "WHERE record_origin = 'historical';" in migration
+    assert (
+        "WHERE record_origin = 'historical'\n"
+        "  AND (product_equipment IS NULL OR btrim(product_equipment) = '');"
+    ) in migration
 
 
 def test_product_pattern_matches_tokens_but_not_embedded_prefixes():
@@ -232,3 +235,16 @@ def test_product_pattern_matches_tokens_but_not_embedded_prefixes():
     assert token_pattern.search("LMFP qualification").group(1) == "LMFP"
     assert token_pattern.search("XNCM811Y") is None
     assert token_pattern.search("preLFPgrade") is None
+
+
+def test_product_backfill_preserves_populated_and_user_input_values():
+    def selected(record_origin, product_equipment):
+        return record_origin == "historical" and (
+            product_equipment is None or product_equipment.strip() == ""
+        )
+
+    assert selected("historical", None)
+    assert selected("historical", " ")
+    assert not selected("historical", "NCM811")
+    assert not selected("user_input", None)
+    assert not selected("user_input", "LFP")
