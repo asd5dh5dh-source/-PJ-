@@ -1,0 +1,108 @@
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import ArchivePage from "./page";
+
+const archiveItem = {
+  case_id: "COM-001",
+  customer_name: "Alpha",
+  product_equipment: "NCM811",
+  voc_type: "Complaint",
+  voc_subtype: "Cell Low Voltage",
+  customer_request: "Cell low voltage alarm",
+  responsible_departments: "Quality",
+  received_at: "2026-01-02",
+  final_status: "closed",
+  record_origin: "historical",
+  bm25_score: 2.25,
+  final_score: 3.25,
+  matched_keywords: ["gas", "generation"],
+};
+
+const archivePage = {
+  items: [archiveItem],
+  total: 1,
+  page: 1,
+  page_size: 20,
+  sort: "relevance" as const,
+};
+
+const archiveDetail = {
+  ...archiveItem,
+  original_mail_body: "The cell voltage is below the requested level.",
+  full_response_history: "Reviewed low voltage condition.",
+};
+
+describe("ArchivePage", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        const data = url.includes("/COM-001")
+          ? archiveDetail
+          : { ...archivePage, sort: url.includes("q=") ? "relevance" : "latest" };
+        return new Response(JSON.stringify(data), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+  });
+
+  it("keeps URL-backed filters while opening and closing the preview", async () => {
+    const user = userEvent.setup();
+    render(<ArchivePage />);
+
+    await user.type(screen.getByRole("searchbox"), "gas generation");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    await user.click(await screen.findByText("COM-001"));
+
+    const preview = await screen.findByRole("complementary");
+    expect(preview).toHaveTextContent("원본 메일");
+    expect(screen.getByRole("searchbox")).toHaveValue("gas generation");
+    expect(window.location.search).toContain("q=gas+generation");
+    expect(window.location.search).toContain("case_id=COM-001");
+
+    await user.click(within(preview).getByRole("button", { name: "미리보기 닫기" }));
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(window.location.search).toBe("?q=gas+generation&sort=relevance");
+  });
+
+  it("offers relevance sorting only for keyword searches", async () => {
+    const user = userEvent.setup();
+    render(<ArchivePage />);
+
+    const sort = await screen.findByRole("combobox", { name: "정렬" });
+    expect(within(sort).queryByRole("option", { name: "관련도순" })).not.toBeInTheDocument();
+
+    await user.type(screen.getByRole("searchbox"), "gas");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+
+    expect(within(screen.getByRole("combobox", { name: "정렬" })).getByRole("option", { name: "관련도순" })).toBeInTheDocument();
+  });
+
+  it("keeps draft filters when changing the result sort", async () => {
+    const user = userEvent.setup();
+    render(<ArchivePage />);
+
+    await user.click(screen.getByText("상세 필터"));
+    await user.type(screen.getByRole("textbox", { name: "고객사" }), "Alpha");
+    await user.selectOptions(await screen.findByRole("combobox", { name: "정렬" }), "oldest");
+
+    expect(window.location.search).toBe("?customer_name=Alpha&sort=oldest");
+    expect(screen.getByRole("textbox", { name: "고객사" })).toHaveValue("Alpha");
+  });
+
+  it("shows a retryable error instead of stale results", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("bad gateway", { status: 502 })));
+
+    render(<ArchivePage />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("검색 결과를 불러오지 못했습니다.");
+    expect(within(alert).getByRole("button", { name: "다시 시도" })).toBeInTheDocument();
+    expect(screen.queryByText("COM-001")).not.toBeInTheDocument();
+  });
+});
