@@ -26,6 +26,8 @@ class WriterCredentials(BaseModel):
     @classmethod
     def normalize_writer_name(cls, value: str) -> str:
         value = value.strip()
+        if "\x00" in value:
+            raise ValueError("writer_name must not contain NUL")
         if not value:
             raise ValueError("writer_name must not be blank")
         return value

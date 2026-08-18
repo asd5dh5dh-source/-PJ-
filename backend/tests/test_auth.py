@@ -139,6 +139,18 @@ def test_writer_dependency_rejects_malformed_percent_encoded_name(
     assert response.status_code == 401
 
 
+def test_writer_dependency_rejects_percent_encoded_nul_name(protected_client):
+    response = protected_client.get(
+        "/protected",
+        headers={
+            "X-Writer-Name": "%00",
+            "X-Writer-Password": "correct-password",
+        },
+    )
+
+    assert response.status_code == 401
+
+
 def test_writer_dependency_rejects_missing_headers(protected_client):
     assert protected_client.get("/protected").status_code == 401
 
