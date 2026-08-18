@@ -6,8 +6,8 @@ CREATE TABLE IF NOT EXISTS public.writer_attempts (
     attempted_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_writer_attempts_lockout
-    ON public.writer_attempts (writer_name, client_ip, attempted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_writer_attempts_ip_lockout
+    ON public.writer_attempts (client_ip, attempted_at DESC);
 
 CREATE TABLE IF NOT EXISTS public.voc_requests (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -70,8 +70,24 @@ CREATE TABLE IF NOT EXISTS public.department_tasks (
     created_by text NOT NULL CHECK (btrim(created_by) <> ''),
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT department_tasks_id_request_unique UNIQUE (id, voc_request_id),
     CHECK (status <> 'delayed' OR coalesce(btrim(delay_reason), '') <> '')
 );
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'public.department_tasks'::regclass
+          AND conname = 'department_tasks_id_request_unique'
+    ) THEN
+        ALTER TABLE public.department_tasks
+            ADD CONSTRAINT department_tasks_id_request_unique
+            UNIQUE (id, voc_request_id);
+    END IF;
+END;
+$$;
 
 CREATE INDEX IF NOT EXISTS idx_department_tasks_request
     ON public.department_tasks (voc_request_id, status);
@@ -83,15 +99,36 @@ CREATE TABLE IF NOT EXISTS public.task_reviews (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     voc_request_id bigint NOT NULL
         REFERENCES public.voc_requests(id) ON DELETE RESTRICT,
-    task_id bigint REFERENCES public.department_tasks(id) ON DELETE RESTRICT,
+    task_id bigint,
     reviewer_role text NOT NULL
         CHECK (reviewer_role IN ('department_manager', 'final_approver')),
     decision text NOT NULL CHECK (decision IN ('approved', 'rejected')),
     comment text,
     reviewed_by text NOT NULL CHECK (btrim(reviewed_by) <> ''),
     reviewed_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT task_reviews_task_request_fk
+        FOREIGN KEY (task_id, voc_request_id)
+        REFERENCES public.department_tasks(id, voc_request_id)
+        ON DELETE RESTRICT,
     CHECK (reviewer_role <> 'department_manager' OR task_id IS NOT NULL)
 );
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'public.task_reviews'::regclass
+          AND conname = 'task_reviews_task_request_fk'
+    ) THEN
+        ALTER TABLE public.task_reviews
+            ADD CONSTRAINT task_reviews_task_request_fk
+            FOREIGN KEY (task_id, voc_request_id)
+            REFERENCES public.department_tasks(id, voc_request_id)
+            ON DELETE RESTRICT;
+    END IF;
+END;
+$$;
 
 CREATE INDEX IF NOT EXISTS idx_task_reviews_request
     ON public.task_reviews (voc_request_id, reviewed_at DESC);
@@ -147,11 +184,37 @@ CREATE TABLE IF NOT EXISTS public.notification_logs (
     real_delivery boolean NOT NULL DEFAULT false,
     error_message text,
     created_at timestamptz NOT NULL DEFAULT now(),
-    CHECK (
+    CONSTRAINT notification_logs_external_preview_only CHECK (
         runtime_profile <> 'external_review'
-        OR (NOT real_delivery AND delivery_status <> 'sent' AND sent_at IS NULL)
+        OR (
+            delivery_status = 'preview'
+            AND NOT real_delivery
+            AND sent_at IS NULL
+        )
     )
 );
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'public.notification_logs'::regclass
+          AND conname = 'notification_logs_external_preview_only'
+    ) THEN
+        ALTER TABLE public.notification_logs
+            ADD CONSTRAINT notification_logs_external_preview_only
+            CHECK (
+                runtime_profile <> 'external_review'
+                OR (
+                    delivery_status = 'preview'
+                    AND NOT real_delivery
+                    AND sent_at IS NULL
+                )
+            );
+    END IF;
+END;
+$$;
 
 CREATE INDEX IF NOT EXISTS idx_notification_logs_schedule
     ON public.notification_logs (delivery_status, scheduled_at);

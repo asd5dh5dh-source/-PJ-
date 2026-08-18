@@ -16,9 +16,6 @@ from app.config import Settings, get_settings
 from app.db import WriterAttemptStore
 
 
-MAX_FAILURES = 5
-
-
 class WriterCredentials(BaseModel):
     writer_name: str = Field(min_length=1, max_length=200)
     password: SecretStr = Field(min_length=1, max_length=1024)
@@ -53,13 +50,6 @@ def _verify_credentials(
 ) -> WriterContext:
     client_ip = _client_ip(request)
     store = _attempt_store(request)
-    if store.recent_failure_count(credentials.writer_name, client_ip) >= MAX_FAILURES:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Writer verification is locked for 15 minutes",
-            headers={"Retry-After": "900"},
-        )
-
     expected_hash = settings.voc_writer_password_hash.get_secret_value().lower()
     if not expected_hash:
         raise HTTPException(
@@ -70,7 +60,15 @@ def _verify_credentials(
         credentials.password.get_secret_value().encode("utf-8")
     ).hexdigest()
     succeeded = hmac.compare_digest(supplied_hash, expected_hash)
-    store.record_attempt(credentials.writer_name, client_ip, succeeded)
+    locked = store.record_and_check_locked(
+        credentials.writer_name, client_ip, succeeded
+    )
+    if locked:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Writer verification is locked for 15 minutes",
+            headers={"Retry-After": "900"},
+        )
     if not succeeded:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

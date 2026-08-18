@@ -16,43 +16,60 @@ from app.main import create_app
 class InMemoryWriterAttemptStore:
     attempts: list[tuple[str, str, bool]] = field(default_factory=list)
 
-    def recent_failure_count(self, writer_name: str, client_ip: str) -> int:
+    def record_and_check_locked(
+        self, writer_name: str, client_ip: str, succeeded: bool
+    ) -> bool:
         failures = 0
-        for attempted_writer, attempted_ip, succeeded in reversed(self.attempts):
-            if (attempted_writer, attempted_ip) != (writer_name, client_ip):
+        for _, attempted_ip, attempt_succeeded in reversed(self.attempts):
+            if attempted_ip != client_ip:
                 continue
-            if succeeded:
+            if attempt_succeeded:
                 break
             failures += 1
-        return failures
-
-    def record_attempt(
-        self, writer_name: str, client_ip: str, succeeded: bool
-    ) -> None:
+        if failures >= 5:
+            return True
         self.attempts.append((writer_name, client_ip, succeeded))
+        return False
 
 
-def test_attempt_store_uses_an_unambiguous_parameterized_lockout_query(
+def test_attempt_store_locks_and_records_in_one_ip_keyed_transaction(
     monkeypatch,
 ):
     class Result:
+        def __init__(self, row=None):
+            self.row = row
+
         def fetchone(self):
-            return {"failure_count": 4}
+            return self.row
 
     class Connection:
+        def __init__(self):
+            self.calls = []
+
         def execute(self, query, params):
-            assert "attempts.attempted_at >=" in query
-            assert "attempts.attempted_at >" in query
-            assert params == ("Kim", "198.51.100.10", "Kim", "198.51.100.10")
+            self.calls.append((query, params))
+            if "failure_count" in query:
+                return Result({"failure_count": 4})
             return Result()
+
+    connection = Connection()
 
     @contextmanager
     def fake_connection():
-        yield Connection()
+        yield connection
 
     monkeypatch.setattr("app.db.database_connection", fake_connection)
 
-    assert WriterAttemptStore().recent_failure_count("Kim", "198.51.100.10") == 4
+    assert (
+        WriterAttemptStore().record_and_check_locked(
+            "Kim", "198.51.100.10", False
+        )
+        is False
+    )
+    assert "pg_advisory_xact_lock" in connection.calls[0][0]
+    assert connection.calls[0][1] == ("198.51.100.10",)
+    assert connection.calls[1][1] == ("198.51.100.10", "198.51.100.10")
+    assert connection.calls[2][1] == ("Kim", "198.51.100.10", False)
 
 
 @pytest.fixture
@@ -137,23 +154,23 @@ def test_five_invalid_passwords_lock_writer_for_fifteen_minutes(writer_app):
     assert locked.status_code == 429
 
 
-def test_lock_is_scoped_to_writer_name_and_client_ip(writer_app):
+def test_lock_is_keyed_by_client_ip_not_arbitrary_writer_name(writer_app):
     shared_store = writer_app.state.writer_attempt_store
     first_ip = TestClient(writer_app, client=("198.51.100.10", 50000))
     second_ip = TestClient(writer_app, client=("198.51.100.11", 50000))
 
-    for _ in range(5):
+    for writer_name in ["Kim", "Lee", "Park", "Choi", "Jung"]:
         assert first_ip.post(
             "/api/writer/verify",
-            json={"writer_name": "Kim", "password": "wrong"},
+            json={"writer_name": writer_name, "password": "wrong"},
         ).status_code == 401
 
     assert first_ip.post(
         "/api/writer/verify",
-        json={"writer_name": "Lee", "password": "wrong"},
-    ).status_code == 401
+        json={"writer_name": "Another Name", "password": "wrong"},
+    ).status_code == 429
     assert second_ip.post(
         "/api/writer/verify",
         json={"writer_name": "Kim", "password": "wrong"},
     ).status_code == 401
-    assert len(shared_store.attempts) == 7
+    assert len(shared_store.attempts) == 6

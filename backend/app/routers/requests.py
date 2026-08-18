@@ -1,10 +1,11 @@
 from collections.abc import Callable
 from datetime import date
-from typing import Any
+from typing import Annotated, Any
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.auth import WriterContext, require_writer
 from app.schemas import ArchiveDetail, ManualRequest, SimilarCases
 from app.services.search import ArchiveSearchService
 
@@ -17,7 +18,10 @@ def create_requests_router(
     router = APIRouter(prefix="/api/requests", tags=["requests"])
 
     @router.post("", response_model=ArchiveDetail, status_code=status.HTTP_201_CREATED)
-    def create_request(payload: ManualRequest):
+    def create_request(
+        payload: ManualRequest,
+        _writer: Annotated[WriterContext, Depends(require_writer)],
+    ):
         values = payload.model_dump(exclude_none=True)
         values.update(
             {

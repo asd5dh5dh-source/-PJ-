@@ -8,6 +8,7 @@ from threading import Event, Lock
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import get_settings
 from app.main import create_app
 from app.repositories.voc_cases import VocCaseRepository
 from app.services.search import ArchiveSearchService
@@ -23,6 +24,19 @@ VALID_REQUEST = {
     "responsible_departments": "Quality",
     "received_at": "2026-08-14",
 }
+
+WRITER_HEADERS = {
+    "X-Writer-Name": "Kim",
+    "X-Writer-Password": "correct-password",
+}
+
+
+class AlwaysUnlockedWriterAttemptStore:
+    def record_and_check_locked(
+        self, writer_name: str, client_ip: str, succeeded: bool
+    ) -> bool:
+        return False
+
 
 CASES = [
     {
@@ -112,9 +126,34 @@ def repository():
     return FakeRepository()
 
 
+@pytest.fixture(autouse=True)
+def writer_environment(monkeypatch):
+    monkeypatch.setenv(
+        "VOC_WRITER_PASSWORD_HASH",
+        "9246aa9be8de7b40d64eb664986430793b6cc13a19d2a456981e44f28303f9cf",
+    )
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+def authenticated_client(app):
+    app.state.writer_attempt_store = AlwaysUnlockedWriterAttemptStore()
+    return TestClient(app, headers=WRITER_HEADERS)
+
+
 @pytest.fixture
 def client(repository):
-    return TestClient(create_app(repository))
+    return authenticated_client(create_app(repository))
+
+
+def test_manual_request_requires_writer_headers(repository):
+    response = TestClient(create_app(repository)).post(
+        "/api/requests", json=VALID_REQUEST
+    )
+
+    assert response.status_code == 401
+    assert repository.created_values is None
 
 
 def test_manual_request_is_stored_as_user_input(client, repository):
@@ -179,7 +218,7 @@ def test_manual_request_rejects_whitespace_only_required_fields(client, field):
 
 
 def test_manual_request_assigns_server_receipt_date_when_missing(repository):
-    client = TestClient(
+    client = authenticated_client(
         create_app(repository, receipt_date=lambda: date(2026, 8, 18))
     )
     payload = VALID_REQUEST | {}
