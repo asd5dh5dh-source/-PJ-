@@ -71,6 +71,7 @@ class FakeRepository:
         self.cases = deepcopy(CASES)
         self.created_values = None
         self.filters_history = []
+        self.list_error = None
 
     def create(self, values):
         self.created_values = dict(values)
@@ -82,6 +83,8 @@ class FakeRepository:
         return next((case for case in self.cases if case["case_id"] == case_id), None)
 
     def list_candidates(self, filters=None, **filter_values):
+        if self.list_error is not None:
+            raise self.list_error
         selected = dict(filters or {}) | filter_values
         self.filters_history.append(selected)
         return [
@@ -140,6 +143,55 @@ def test_manual_request_is_stored_as_user_input(client, repository):
     }
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        "customer_name",
+        "voc_type",
+        "voc_subtype",
+        "customer_request",
+        "original_mail_body",
+    ],
+)
+def test_manual_request_rejects_missing_required_fields(client, field):
+    payload = VALID_REQUEST | {}
+    payload.pop(field)
+
+    response = client.post("/api/requests", json=payload)
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "customer_name",
+        "voc_type",
+        "voc_subtype",
+        "customer_request",
+        "original_mail_body",
+    ],
+)
+def test_manual_request_rejects_whitespace_only_required_fields(client, field):
+    response = client.post("/api/requests", json=VALID_REQUEST | {field: " \t "})
+
+    assert response.status_code == 422
+
+
+def test_manual_request_assigns_server_receipt_date_when_missing(repository):
+    client = TestClient(
+        create_app(repository, receipt_date=lambda: date(2026, 8, 18))
+    )
+    payload = VALID_REQUEST | {}
+    payload.pop("received_at")
+
+    response = client.post("/api/requests", json=payload)
+
+    assert response.status_code == 201
+    assert response.json()["received_at"] == "2026-08-18"
+    assert repository.created_values["received_at"] == date(2026, 8, 18)
+
+
 def test_top_three_uses_closed_cases_only(client, repository):
     case_id = client.post("/api/requests", json=VALID_REQUEST).json()["case_id"]
 
@@ -167,6 +219,20 @@ def test_creation_refreshes_once_and_next_archive_search_reuses_it(client, repos
     refreshed_response = client.get("/api/archive", params={"q": "gas generation"})
 
     assert len(repository.filters_history) == 2
+    assert response.json()["case_id"] in {
+        item["case_id"] for item in refreshed_response.json()["items"]
+    }
+
+
+def test_creation_survives_unavailable_refresh_and_later_search_reloads(client, repository):
+    client.get("/api/archive", params={"q": "gas generation"})
+    repository.list_error = RuntimeError("temporary read failure")
+
+    response = client.post("/api/requests", json=VALID_REQUEST)
+
+    assert response.status_code == 201
+    repository.list_error = None
+    refreshed_response = client.get("/api/archive", params={"q": "gas generation"})
     assert response.json()["case_id"] in {
         item["case_id"] for item in refreshed_response.json()["items"]
     }

@@ -47,8 +47,9 @@ class VocCaseRepository:
                        count(*) FILTER (WHERE record_origin = 'historical') AS historical_count,
                        count(*) - count(DISTINCT case_id) AS duplicate_case_ids,
                        count(*) FILTER (
-                           WHERE product_equipment IS NULL
-                              OR btrim(product_equipment) = ''
+                           WHERE record_origin = 'historical'
+                             AND (product_equipment IS NULL
+                                  OR btrim(product_equipment) = '')
                        ) AS missing_product_equipment
                 FROM public.voc_cases
                 """

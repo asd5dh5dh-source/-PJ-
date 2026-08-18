@@ -116,6 +116,23 @@ describe("new request workflow", () => {
     expect(screen.getByLabelText("고객명")).toHaveValue("Customer to keep");
   });
 
+  it("rejects trimmed-empty required fields without posting", async () => {
+    const user = userEvent.setup();
+    render(<NewRequestPage />);
+
+    await user.type(screen.getByLabelText("원본 메일"), "Mail body");
+    await user.type(screen.getByLabelText("고객명"), "   ");
+    await user.selectOptions(screen.getByLabelText("VOC Type"), "Inquiry");
+    await user.type(screen.getByLabelText("VOC Subtype"), "Gas Generation");
+    await user.type(screen.getByLabelText("고객 요청"), "Investigate gas generation");
+    await user.click(screen.getByRole("button", { name: "저장 및 유사 사례 검색" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("고객명");
+    expect(screen.getByLabelText("고객명")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("고객명")).toHaveFocus();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("disables submission while the save is pending", async () => {
     let resolveSave!: (response: Response) => void;
     fetchMock.mockReturnValueOnce(new Promise((resolve) => { resolveSave = resolve; }));

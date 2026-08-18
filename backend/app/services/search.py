@@ -30,6 +30,10 @@ class ArchiveSearchService:
             self._candidate_cache = {(): candidates}
             self.index.refresh(candidates)
 
+    def invalidate(self) -> None:
+        with self._lock:
+            self._candidate_cache.clear()
+
     def _list_candidates(self, filters: dict[str, Any]) -> list[dict[str, Any]]:
         key = tuple(sorted(filters.items()))
         if key not in self._candidate_cache:

@@ -23,7 +23,7 @@ def candidates():
         {
             "case_id": "CUSTOMER-NAME-ONLY",
             "voc_subtype": "Other",
-            "customer_name": "Gas Generation Corporation",
+            "customer_name": "Gas Generation " * 100,
             "customer_request": "Need a shipping update.",
             "original_mail_body": "When will the shipment arrive?",
             "full_response_history": "Shipping team responded.",
@@ -47,6 +47,9 @@ def test_customer_name_does_not_override_stronger_request_match(index, candidate
     ranked = index.rank("gas generation", candidates, "Gas Generation", 3)
 
     assert ranked[0].case_id == "REQ-GAS-CONTENT-MATCH"
+    name_only = next(item for item in ranked if item.case_id == "CUSTOMER-NAME-ONLY")
+    assert name_only.bm25_score == 0
+    assert name_only.matched_keywords == []
 
 
 def test_rank_reports_query_keywords_present_in_the_searchable_fields(index, candidates):

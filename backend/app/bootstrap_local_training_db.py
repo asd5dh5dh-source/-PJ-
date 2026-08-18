@@ -42,23 +42,14 @@ DATE_COLUMNS = {"received_at", "first_response_at", "due_6d_at"}
 BOOLEAN_COLUMNS = {"auto_close", "reactivated"}
 
 
-def resolve_catalog_name(names: list[str]) -> str:
-    if EXPECTED_DATABASE in names:
-        return EXPECTED_DATABASE
-
-    diagnostics = ", ".join(
-        f"{name!r} length={len(name)} utf8_hex={name.encode('utf-8').hex()}"
-        for name in names
-    )
-    raise RuntimeError(f"No exact training database match. Catalog: {diagnostics}")
-
-
-def seed_action(row_count: int) -> str:
-    if row_count == 0:
+def seed_action(historical_count: int) -> str:
+    if historical_count == 0:
         return "seed"
-    if row_count == 135:
+    if historical_count == 135:
         return "skip"
-    raise RuntimeError(f"Refusing to seed database containing {row_count} rows")
+    raise RuntimeError(
+        f"Refusing to seed database containing {historical_count} historical rows"
+    )
 
 
 def load_training_rows(path: Path) -> tuple[list[str], list[dict[str, str]]]:
@@ -135,48 +126,58 @@ def bootstrap_training_database(
         "password": settings.voc_db_password.get_secret_value(),
         "row_factory": dict_row,
     }
-
-    with connect(dbname="postgres", **connection_options) as maintenance:
-        names = [
-            row["datname"]
-            for row in maintenance.execute(
-                "SELECT datname FROM pg_database ORDER BY datname"
-            ).fetchall()
-        ]
-    database_name = resolve_catalog_name(names)
+    database_name = settings.voc_db_name
+    if database_name != EXPECTED_DATABASE:
+        raise RuntimeError("Bootstrap requires the exact training database name")
 
     backend = repository_root / "backend"
     with connect(dbname=database_name, **connection_options) as connection:
+        connected_database = connection.execute(
+            "SELECT current_database() AS database_name"
+        ).fetchone()["database_name"]
+        if connected_database != EXPECTED_DATABASE:
+            raise RuntimeError("Connection did not reach the exact training database")
+
         execute_plain_sql(connection, backend / "migrations" / "000_bootstrap_voc_cases.sql")
-        row_count = connection.execute(
-            "SELECT count(*) AS row_count FROM public.voc_cases"
-        ).fetchone()["row_count"]
-        if seed_action(row_count) == "seed":
+        execute_plain_sql(connection, backend / "migrations" / "001_local_search.sql")
+        historical_count = connection.execute(
+            """
+            SELECT count(*) FILTER (WHERE record_origin = 'historical')
+                   AS seed_historical_count
+            FROM public.voc_cases
+            """
+        ).fetchone()["seed_historical_count"]
+        if seed_action(historical_count) == "seed":
             _, rows = load_training_rows(repository_root / "work" / "voc_train.csv")
             seed_training_rows(connection, rows)
+            execute_plain_sql(connection, backend / "migrations" / "001_local_search.sql")
 
         verified_count = connection.execute(
-            "SELECT count(*) AS row_count FROM public.voc_cases"
-        ).fetchone()["row_count"]
+            """
+            SELECT count(*) FILTER (WHERE record_origin = 'historical')
+                   AS verified_historical_count
+            FROM public.voc_cases
+            """
+        ).fetchone()["verified_historical_count"]
         if verified_count != 135:
-            raise RuntimeError(f"Expected 135 training rows, found {verified_count}")
+            raise RuntimeError(f"Expected 135 historical rows, found {verified_count}")
 
-        execute_plain_sql(connection, backend / "migrations" / "001_local_search.sql")
         summary_row = connection.execute(
             """
             SELECT current_database() AS database_name,
                    count(*) FILTER (WHERE record_origin = 'historical') AS historical_count,
                    count(*) - count(DISTINCT case_id) AS duplicate_case_ids,
                    count(*) FILTER (
-                       WHERE product_equipment IS NULL
-                          OR btrim(product_equipment) = ''
+                       WHERE record_origin = 'historical'
+                         AND (product_equipment IS NULL
+                              OR btrim(product_equipment) = '')
                    ) AS missing_product_equipment
             FROM public.voc_cases
             """
         ).fetchone()
         summary = DatasetSummary(**summary_row)
         if (
-            summary.database_name != database_name
+            summary.database_name != EXPECTED_DATABASE
             or summary.historical_count != 135
             or summary.duplicate_case_ids != 0
             or summary.missing_product_equipment != 0

@@ -2,7 +2,6 @@ from contextlib import nullcontext
 from pathlib import Path
 import re
 from types import SimpleNamespace
-import unicodedata
 
 import pytest
 from pydantic import SecretStr
@@ -10,7 +9,6 @@ from pydantic import SecretStr
 from app.bootstrap_local_training_db import (
     bootstrap_training_database,
     load_training_rows,
-    resolve_catalog_name,
     seed_action,
     seed_training_rows,
 )
@@ -24,26 +22,6 @@ SEARCH_MIGRATION = BACKEND / "migrations" / "001_local_search.sql"
 
 def expected_database_name():
     return "".join(chr(code) for code in (0xD559, 0xC2B5, 0xC6A9)) + " Data"
-
-
-def test_catalog_resolution_prefers_exact_match():
-    expected = expected_database_name()
-
-    assert resolve_catalog_name([expected + " ", expected]) == expected
-
-
-def test_catalog_resolution_rejects_normalized_but_non_exact_match():
-    expected = expected_database_name()
-    decomposed = unicodedata.normalize("NFD", expected) + " "
-
-    with pytest.raises(RuntimeError):
-        resolve_catalog_name([decomposed])
-
-
-@pytest.mark.parametrize("names", [["postgres"], ["학습용 Data ", "학습용 Data  "]])
-def test_catalog_resolution_stops_when_match_is_not_unique(names):
-    with pytest.raises(RuntimeError):
-        resolve_catalog_name(names)
 
 
 @pytest.mark.parametrize(
@@ -107,17 +85,24 @@ class FakeResult:
 
 
 class FakeConnection:
-    def __init__(self, database_name, summary=None):
+    def __init__(self, database_name, summary=None, total_count=135):
         self.database_name = database_name
         self.summary = summary
+        self.total_count = total_count
         self.queries = []
 
     def execute(self, query, params=None):
         self.queries.append((query, params))
         if "FROM pg_database" in query:
             return FakeResult(rows=[{"datname": expected_database_name()}])
+        if query.strip() == "SELECT current_database() AS database_name":
+            return FakeResult(row={"database_name": self.database_name})
+        if "AS seed_historical_count" in query:
+            return FakeResult(row={"seed_historical_count": 135})
+        if "AS verified_historical_count" in query:
+            return FakeResult(row={"verified_historical_count": 135})
         if "count(*) AS row_count" in query:
-            return FakeResult(row={"row_count": 135})
+            return FakeResult(row={"row_count": self.total_count})
         if "AS historical_count" in query:
             return FakeResult(
                 row=self.summary or {
@@ -136,7 +121,17 @@ class FakeConnection:
         return False
 
 
-def test_bootstrap_uses_psycopg_keyword_connections_and_plain_sql():
+def settings(database_name=None):
+    return SimpleNamespace(
+        voc_db_host="localhost",
+        voc_db_port=5432,
+        voc_db_name=database_name or expected_database_name(),
+        voc_db_user="postgres",
+        voc_db_password=SecretStr("local-secret"),
+    )
+
+
+def test_bootstrap_connects_directly_to_validated_database_and_verifies_it_first():
     connections = []
 
     def connect(**kwargs):
@@ -144,57 +139,78 @@ def test_bootstrap_uses_psycopg_keyword_connections_and_plain_sql():
         connections.append((kwargs, connection))
         return nullcontext(connection)
 
-    settings = SimpleNamespace(
-        voc_db_host="localhost",
-        voc_db_port=5432,
-        voc_db_user="postgres",
-        voc_db_password=SecretStr("local-secret"),
-    )
-
     summary = bootstrap_training_database(
-        settings=settings,
+        settings=settings(),
         connect=connect,
         repository_root=REPOSITORY,
     )
 
-    assert [item[0]["dbname"] for item in connections] == [
-        "postgres",
-        expected_database_name(),
-    ]
+    assert [item[0]["dbname"] for item in connections] == [expected_database_name()]
     assert all("conninfo" not in item[0] for item in connections)
-    target_sql = "\n".join(query for query, _ in connections[1][1].queries)
+    assert connections[0][1].queries[0][0].strip() == (
+        "SELECT current_database() AS database_name"
+    )
+    target_sql = "\n".join(query for query, _ in connections[0][1].queries)
     assert "CREATE TABLE IF NOT EXISTS public.voc_cases" in target_sql
     assert "ALTER TABLE public.voc_cases" in target_sql
     assert "\\copy" not in target_sql
     assert summary.historical_count == 135
 
 
+def test_bootstrap_allows_user_input_rows_beyond_historical_baseline():
+    def connect(**kwargs):
+        return nullcontext(FakeConnection(kwargs["dbname"], total_count=137))
+
+    summary = bootstrap_training_database(
+        settings=settings(),
+        connect=connect,
+        repository_root=REPOSITORY,
+    )
+
+    assert summary.historical_count == 135
+
+
+def test_bootstrap_rejects_unvalidated_database_name_before_connecting():
+    def connect(**kwargs):
+        raise AssertionError("connection must not be attempted")
+
+    with pytest.raises(RuntimeError, match="exact training database"):
+        bootstrap_training_database(
+            settings=settings(expected_database_name() + " "),
+            connect=connect,
+            repository_root=REPOSITORY,
+        )
+
+
+def test_bootstrap_rejects_database_identity_mismatch_before_migrations():
+    connection = FakeConnection("postgres")
+
+    with pytest.raises(RuntimeError, match="exact training database"):
+        bootstrap_training_database(
+            settings=settings(),
+            connect=lambda **kwargs: nullcontext(connection),
+            repository_root=REPOSITORY,
+        )
+
+    assert [query.strip() for query, _ in connection.queries] == [
+        "SELECT current_database() AS database_name"
+    ]
+
+
 def test_bootstrap_rejects_invalid_summary_before_success():
-    connection_count = 0
 
     def connect(**kwargs):
-        nonlocal connection_count
-        connection_count += 1
-        summary = None
-        if connection_count == 2:
-            summary = {
-                "database_name": expected_database_name(),
-                "historical_count": 135,
-                "duplicate_case_ids": 0,
-                "missing_product_equipment": 1,
-            }
+        summary = {
+            "database_name": expected_database_name(),
+            "historical_count": 135,
+            "duplicate_case_ids": 0,
+            "missing_product_equipment": 1,
+        }
         return nullcontext(FakeConnection(kwargs["dbname"], summary))
-
-    settings = SimpleNamespace(
-        voc_db_host="localhost",
-        voc_db_port=5432,
-        voc_db_user="postgres",
-        voc_db_password=SecretStr("local-secret"),
-    )
 
     with pytest.raises(RuntimeError, match="verification summary"):
         bootstrap_training_database(
-            settings=settings,
+            settings=settings(),
             connect=connect,
             repository_root=REPOSITORY,
         )

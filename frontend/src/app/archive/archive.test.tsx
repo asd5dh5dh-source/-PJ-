@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -64,10 +64,62 @@ describe("ArchivePage", () => {
     expect(screen.getByRole("searchbox")).toHaveValue("gas generation");
     expect(window.location.search).toContain("q=gas+generation");
     expect(window.location.search).toContain("case_id=COM-001");
+    expect(within(preview).getByRole("link", { name: "상세 화면에서 보기" })).toHaveAttribute(
+      "href",
+      "/archive/COM-001?return_to=%2Farchive%3Fq%3Dgas%2Bgeneration%26sort%3Drelevance",
+    );
 
     await user.click(within(preview).getByRole("button", { name: "미리보기 닫기" }));
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
     expect(window.location.search).toBe("?q=gas+generation&sort=relevance");
+  });
+
+  it("restores filters and pagination from browser popstate", async () => {
+    window.history.replaceState({}, "", "/archive?q=gas+generation");
+    render(<ArchivePage />);
+
+    expect(await screen.findByRole("searchbox")).toHaveValue("gas generation");
+
+    window.history.pushState({}, "", "/archive?q=cell+voltage&page=2");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    await waitFor(() => expect(screen.getByRole("searchbox")).toHaveValue("cell voltage"));
+    await waitFor(() => expect(String(vi.mocked(fetch).mock.calls.at(-1)?.[0])).toContain("page=2"));
+  });
+
+  it("keeps the selected case while changing pages", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        const page = Number(new URL(url, "http://localhost").searchParams.get("page") ?? 1);
+        const data = url.includes("/COM-001")
+          ? archiveDetail
+          : { ...archivePage, total: 40, page };
+        return new Response(JSON.stringify(data), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    render(<ArchivePage />);
+
+    await user.click(await screen.findByText("COM-001"));
+    await user.click(await screen.findByRole("button", { name: "다음" }));
+
+    expect(window.location.search).toContain("page=2");
+    expect(window.location.search).toContain("case_id=COM-001");
+    expect(await screen.findByRole("complementary")).toHaveAccessibleName("COM-001 사례 미리보기");
+  });
+
+  it("does not claim that case IDs are part of full-text search", () => {
+    render(<ArchivePage />);
+
+    expect(screen.getByRole("searchbox")).toHaveAttribute(
+      "placeholder",
+      "요청 내용, 키워드 검색",
+    );
   });
 
   it("offers relevance sorting only for keyword searches", async () => {

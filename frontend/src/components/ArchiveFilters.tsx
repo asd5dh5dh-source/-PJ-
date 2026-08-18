@@ -47,7 +47,7 @@ export default function ArchiveFilters({
             type="search"
             name="q"
             defaultValue={query.q ?? ""}
-            placeholder="사례 ID, 요청 내용, 키워드 검색"
+            placeholder="요청 내용, 키워드 검색"
           />
         </label>
         <button className="primary-button" type="submit">검색</button>

@@ -60,11 +60,11 @@ class ArchivePage(BaseModel):
 
 class ManualRequest(BaseModel):
     customer_request: NonEmptyText
-    original_mail_body: NonEmptyText | None = None
-    customer_name: NonEmptyText | None = None
+    original_mail_body: NonEmptyText
+    customer_name: NonEmptyText
     product_equipment: NonEmptyText | None = None
-    voc_type: NonEmptyText | None = None
-    voc_subtype: NonEmptyText | None = None
+    voc_type: NonEmptyText
+    voc_subtype: NonEmptyText
     responsible_departments: NonEmptyText | None = None
     received_at: date | None = None
 

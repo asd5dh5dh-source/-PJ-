@@ -1,3 +1,5 @@
+from collections.abc import Callable
+from datetime import date
 from typing import Any
 from uuid import uuid4
 
@@ -10,6 +12,7 @@ from app.services.search import ArchiveSearchService
 def create_requests_router(
     repository: Any,
     search_service: ArchiveSearchService,
+    receipt_date: Callable[[], date],
 ) -> APIRouter:
     router = APIRouter(prefix="/api/requests", tags=["requests"])
 
@@ -29,8 +32,9 @@ def create_requests_router(
                 ),
             }
         )
+        values.setdefault("received_at", receipt_date())
         created = repository.create(values)
-        search_service.refresh()
+        search_service.invalidate()
         return created
 
     @router.get("/{case_id}/similar-cases", response_model=SimilarCases)

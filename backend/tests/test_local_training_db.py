@@ -59,6 +59,23 @@ def test_list_candidates_parameterizes_supported_filters(monkeypatch):
     assert params == ("Gas Generation", "closed")
 
 
+def test_dataset_summary_checks_missing_product_only_for_historical_rows(monkeypatch):
+    connection = FakeConnection(
+        {
+            "database_name": "학습용 Data",
+            "historical_count": 135,
+            "duplicate_case_ids": 0,
+            "missing_product_equipment": 0,
+        }
+    )
+    use_connection(monkeypatch, connection)
+
+    VocCaseRepository().dataset_summary()
+
+    query, _ = connection.calls[0]
+    assert "WHERE record_origin = 'historical'" in query
+
+
 def test_responsible_department_filter_uses_existing_plural_column(monkeypatch):
     connection = FakeConnection({"case_id": "VOC-001"})
     use_connection(monkeypatch, connection)
