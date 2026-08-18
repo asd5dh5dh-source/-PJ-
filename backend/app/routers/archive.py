@@ -6,9 +6,11 @@ from app.schemas import ArchiveDetail, ArchivePage, ArchiveQuery
 from app.services.search import ArchiveSearchService
 
 
-def create_archive_router(repository: Any) -> APIRouter:
+def create_archive_router(
+    repository: Any,
+    search_service: ArchiveSearchService,
+) -> APIRouter:
     router = APIRouter(prefix="/api/archive", tags=["archive"])
-    search_service = ArchiveSearchService(repository)
 
     @router.get("", response_model=ArchivePage)
     def list_archive(query: Annotated[ArchiveQuery, Query()]):

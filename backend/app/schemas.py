@@ -56,3 +56,18 @@ class ArchivePage(BaseModel):
     page: int
     page_size: int
     sort: ArchiveSort
+
+
+class ManualRequest(BaseModel):
+    customer_request: NonEmptyText
+    original_mail_body: NonEmptyText | None = None
+    customer_name: NonEmptyText | None = None
+    product_equipment: NonEmptyText | None = None
+    voc_type: NonEmptyText | None = None
+    voc_subtype: NonEmptyText | None = None
+    responsible_departments: NonEmptyText | None = None
+    received_at: date | None = None
+
+
+class SimilarCases(BaseModel):
+    items: list[ArchiveItem]

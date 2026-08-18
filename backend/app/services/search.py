@@ -20,6 +20,18 @@ class ArchiveSearchService:
     def __init__(self, repository: Any, index: Bm25Index | None = None) -> None:
         self.repository = repository
         self.index = index or Bm25Index()
+        self._candidate_cache: dict[tuple[tuple[str, Any], ...], list[dict[str, Any]]] = {}
+
+    def refresh(self) -> None:
+        candidates = self.repository.list_candidates()
+        self._candidate_cache = {(): candidates}
+        self.index.refresh(candidates)
+
+    def _list_candidates(self, filters: dict[str, Any]) -> list[dict[str, Any]]:
+        key = tuple(sorted(filters.items()))
+        if key not in self._candidate_cache:
+            self._candidate_cache[key] = self.repository.list_candidates(filters)
+        return self._candidate_cache[key]
 
     def search_archive(
         self,
@@ -27,7 +39,7 @@ class ArchiveSearchService:
         effective_sort: ArchiveSort,
     ) -> dict[str, Any]:
         filters = query.model_dump(include=self._FILTERS, exclude_none=True)
-        candidates = self.repository.list_candidates(filters)
+        candidates = self._list_candidates(filters)
         items = [dict(case) for case in candidates]
 
         if query.q:
@@ -57,3 +69,35 @@ class ArchiveSearchService:
             "page_size": query.page_size,
             "sort": effective_sort,
         }
+
+    def rank_similar(
+        self,
+        source_case: dict[str, Any],
+        candidates: list[dict[str, Any]],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        query = source_case.get("search_document") or " ".join(
+            filter(
+                None,
+                [
+                    source_case.get("customer_request"),
+                    source_case.get("original_mail_body"),
+                ],
+            )
+        )
+        ranked = self.index.rank(
+            query,
+            candidates,
+            source_case.get("voc_subtype"),
+            limit,
+        )
+        cases_by_id = {str(case["case_id"]): dict(case) for case in candidates}
+        return [
+            cases_by_id[item.case_id]
+            | {
+                "bm25_score": item.bm25_score,
+                "final_score": item.final_score,
+                "matched_keywords": item.matched_keywords,
+            }
+            for item in ranked
+        ]

@@ -94,6 +94,35 @@ def test_archive_query_defaults_to_relevance_and_keeps_filters(client, repositor
     assert repository.filters == {"voc_subtype": "Gas Generation"}
 
 
+def test_archive_reuses_candidates_for_an_identical_keyword_search(client, repository):
+    repository.list_calls = 0
+    original_list_candidates = repository.list_candidates
+
+    def count_list_candidates(filters=None, **filter_values):
+        repository.list_calls += 1
+        return original_list_candidates(filters, **filter_values)
+
+    repository.list_candidates = count_list_candidates
+
+    client.get("/api/archive", params={"q": "gas generation"})
+    client.get("/api/archive", params={"q": "gas generation"})
+
+    assert repository.list_calls == 1
+
+
+def test_archive_propagates_received_date_filters(client, repository):
+    response = client.get(
+        "/api/archive",
+        params={"received_from": "2026-01-01", "received_to": "2026-01-31"},
+    )
+
+    assert response.status_code == 200
+    assert repository.filters == {
+        "received_from": date(2026, 1, 1),
+        "received_to": date(2026, 1, 31),
+    }
+
+
 def test_archive_accepts_oldest_sort_without_a_query(client):
     response = client.get("/api/archive", params={"sort": "oldest"})
 
@@ -128,6 +157,24 @@ def test_archive_detail_returns_the_case(client):
 
     assert response.status_code == 200
     assert response.json()["original_mail_body"].startswith("The cell voltage")
+
+
+def test_create_app_keeps_a_falsy_injected_repository(monkeypatch):
+    class FalsyRepository(FakeRepository):
+        def __bool__(self):
+            return False
+
+    repository = FalsyRepository()
+    default_constructions = []
+    monkeypatch.setattr(
+        "app.main.VocCaseRepository",
+        lambda: default_constructions.append(True) or FakeRepository(),
+    )
+
+    response = TestClient(create_app(repository)).get("/api/archive/COM-001")
+
+    assert response.status_code == 200
+    assert default_constructions == []
 
 
 def test_archive_detail_returns_not_found(client):
