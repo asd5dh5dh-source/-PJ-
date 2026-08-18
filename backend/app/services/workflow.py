@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from app.repositories.collaboration import (
     ApprovalRequired,
+    FinalApproverMismatch,
     ReviewerMismatch,
     RoundNotAllowed,
     StageTransitionNotAllowed,
@@ -112,17 +113,20 @@ class WorkflowService:
             raise HTTPException(
                 status_code=403, detail="Task department manager required"
             )
-        if (
-            values["reviewer_role"] == "final_approver"
-            and hasattr(self.repository, "is_final_approver")
-            and not self.repository.is_final_approver(writer_name)
-        ):
-            raise HTTPException(status_code=403, detail="Fixed final approver required")
         try:
             return self.repository.review_task(task_id, values, writer_name)
         except ReviewerMismatch as error:
             raise HTTPException(
                 status_code=403, detail="Task department manager required"
+            ) from error
+        except FinalApproverMismatch as error:
+            raise HTTPException(
+                status_code=403, detail="Fixed final approver required"
+            ) from error
+        except ApprovalRequired as error:
+            raise HTTPException(
+                status_code=409,
+                detail="Fresh department manager approvals are required",
             ) from error
 
     def change_stage(

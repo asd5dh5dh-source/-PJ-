@@ -46,6 +46,10 @@ class ReviewerMismatch(Exception):
     pass
 
 
+class FinalApproverMismatch(Exception):
+    pass
+
+
 class StageTransitionNotAllowed(Exception):
     def __init__(self, status_code: int, detail: str):
         self.status_code = status_code
@@ -320,7 +324,8 @@ class CollaborationRepository:
                 return None
             assignments = ", ".join(f"{column} = %s" for column in selected)
             after = connection.execute(
-                f"UPDATE public.department_tasks SET {assignments}, updated_at = now() "
+                f"UPDATE public.department_tasks SET {assignments}, "
+                "revision = revision + 1, updated_at = now() "
                 "WHERE id = %s RETURNING *",
                 (*selected.values(), task_id),
             ).fetchone()
@@ -345,12 +350,31 @@ class CollaborationRepository:
                 and task["manager_name"] != writer_name
             ):
                 raise ReviewerMismatch
+            if values["reviewer_role"] == "final_approver":
+                configured = connection.execute(
+                    """
+                    SELECT person.name
+                    FROM public.master_final_approvers AS final
+                    JOIN public.master_people AS person ON person.id = final.person_id
+                    WHERE person.active AND person.name = %s
+                    """,
+                    (writer_name,),
+                ).fetchone()
+                if configured is None:
+                    raise FinalApproverMismatch
+                if (
+                    values["decision"] == "approved"
+                    and not self._manager_approvals_complete(
+                        connection, task["voc_request_id"]
+                    )
+                ):
+                    raise ApprovalRequired
             review = connection.execute(
                 """
                 INSERT INTO public.task_reviews (
                     voc_request_id, task_id, reviewer_role, decision,
-                    comment, reviewed_by
-                ) VALUES (%s, %s, %s, %s, %s, %s)
+                    task_revision, comment, reviewed_by
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                 RETURNING *
                 """,
                 (
@@ -358,6 +382,7 @@ class CollaborationRepository:
                     task_id,
                     values["reviewer_role"],
                     values["decision"],
+                    task["revision"],
                     values.get("comment"),
                     writer_name,
                 ),
@@ -375,7 +400,8 @@ class CollaborationRepository:
                 after = connection.execute(
                     """
                     UPDATE public.department_tasks
-                    SET status = 'reviewing', updated_at = now()
+                    SET status = 'reviewing', revision = revision + 1,
+                        updated_at = now()
                     WHERE id = %s RETURNING *
                     """,
                     (task_id,),
@@ -396,62 +422,73 @@ class CollaborationRepository:
             return self._approvals_complete(connection, request_id)
 
     @staticmethod
-    def _approvals_complete(connection, request_id: int) -> bool:
+    def _manager_approvals_complete(connection, request_id: int) -> bool:
         row = connection.execute(
                 """
-                WITH all_tasks AS (
-                    SELECT id, status, updated_at
+                WITH active_tasks AS (
+                    SELECT id, status, revision
                     FROM public.department_tasks
-                    WHERE voc_request_id = %s
-                ), active_tasks AS (
-                    SELECT * FROM all_tasks WHERE status <> 'excluded'
+                    WHERE voc_request_id = %s AND status <> 'excluded'
                 ), latest_manager AS (
-                    SELECT DISTINCT ON (task_id) task_id, decision, reviewed_at
+                    SELECT DISTINCT ON (task_id)
+                           id, task_id, decision, task_revision
                     FROM public.task_reviews
                     WHERE voc_request_id = %s
                       AND reviewer_role = 'department_manager'
-                    ORDER BY task_id, reviewed_at DESC, id DESC
-                ), latest_final AS (
-                    SELECT decision, reviewed_at
-                    FROM public.task_reviews
-                    WHERE voc_request_id = %s
-                      AND reviewer_role = 'final_approver'
-                    ORDER BY reviewed_at DESC, id DESC
-                    LIMIT 1
+                    ORDER BY task_id, id DESC
                 )
                 SELECT NOT EXISTS (
                            SELECT 1 FROM active_tasks AS task
                            LEFT JOIN latest_manager AS review ON review.task_id = task.id
                            WHERE task.status <> 'completed'
                               OR review.decision IS DISTINCT FROM 'approved'
-                              OR review.reviewed_at < task.updated_at
-                       )
-                       AND EXISTS (
-                           SELECT 1 FROM latest_final
-                           WHERE decision = 'approved'
-                             AND reviewed_at >= (
-                                 SELECT max(updated_at) FROM all_tasks
-                             )
+                              OR review.task_revision IS DISTINCT FROM task.revision
                        ) AS approved
                 """,
-                (request_id, request_id, request_id),
+                (request_id, request_id),
             ).fetchone()
         return bool(row["approved"])
 
-    def is_final_approver(self, writer_name: str) -> bool:
-        with self.connection_factory() as connection:
-            return (
-                connection.execute(
-                    """
-                    SELECT 1
-                    FROM public.master_final_approvers AS final
-                    JOIN public.master_people AS person ON person.id = final.person_id
-                    WHERE person.active AND person.name = %s
-                    """,
-                    (writer_name,),
-                ).fetchone()
-                is not None
+    @classmethod
+    def _approvals_complete(cls, connection, request_id: int) -> bool:
+        if not cls._manager_approvals_complete(connection, request_id):
+            return False
+        row = connection.execute(
+            """
+            WITH active_tasks AS (
+                SELECT id, revision
+                FROM public.department_tasks
+                WHERE voc_request_id = %s AND status <> 'excluded'
+            ), latest_manager AS (
+                SELECT DISTINCT ON (task_id)
+                       id, task_id, task_revision
+                FROM public.task_reviews
+                WHERE voc_request_id = %s
+                  AND reviewer_role = 'department_manager'
+                ORDER BY task_id, id DESC
+            ), latest_final AS (
+                SELECT id, decision
+                FROM public.task_reviews
+                WHERE voc_request_id = %s
+                  AND reviewer_role = 'final_approver'
+                ORDER BY id DESC
+                LIMIT 1
             )
+            SELECT EXISTS (
+                SELECT 1
+                FROM latest_final AS final_review
+                WHERE final_review.decision = 'approved'
+                  AND final_review.id > (
+                      SELECT coalesce(max(manager.id), 0)
+                      FROM active_tasks AS task
+                      JOIN latest_manager AS manager ON manager.task_id = task.id
+                      WHERE manager.task_revision = task.revision
+                  )
+            ) AS approved
+            """,
+            (request_id, request_id, request_id),
+        ).fetchone()
+        return bool(row["approved"])
 
     def change_stage(
         self,

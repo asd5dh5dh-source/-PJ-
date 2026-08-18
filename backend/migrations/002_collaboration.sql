@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS public.department_tasks (
     due_date date,
     delay_reason text,
     ecm_link text,
+    revision bigint NOT NULL DEFAULT 0 CHECK (revision >= 0),
     created_by text NOT NULL CHECK (btrim(created_by) <> ''),
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
@@ -95,6 +96,9 @@ CREATE INDEX IF NOT EXISTS idx_department_tasks_due_date
     ON public.department_tasks (due_date)
     WHERE status NOT IN ('completed', 'excluded');
 
+ALTER TABLE public.department_tasks
+    ADD COLUMN IF NOT EXISTS revision bigint NOT NULL DEFAULT 0;
+
 CREATE TABLE IF NOT EXISTS public.task_reviews (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     voc_request_id bigint NOT NULL
@@ -103,6 +107,7 @@ CREATE TABLE IF NOT EXISTS public.task_reviews (
     reviewer_role text NOT NULL
         CHECK (reviewer_role IN ('department_manager', 'final_approver')),
     decision text NOT NULL CHECK (decision IN ('approved', 'rejected')),
+    task_revision bigint,
     comment text,
     reviewed_by text NOT NULL CHECK (btrim(reviewed_by) <> ''),
     reviewed_at timestamptz NOT NULL DEFAULT now(),
@@ -134,6 +139,9 @@ CREATE INDEX IF NOT EXISTS idx_task_reviews_request
     ON public.task_reviews (voc_request_id, reviewed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_task_reviews_task
     ON public.task_reviews (task_id, reviewed_at DESC);
+
+ALTER TABLE public.task_reviews
+    ADD COLUMN IF NOT EXISTS task_revision bigint;
 
 CREATE TABLE IF NOT EXISTS public.voc_stage_history (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

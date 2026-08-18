@@ -165,7 +165,7 @@ def test_voc_detail_includes_task_review_audits():
     assert detail["audits"] == [{"entity_type": "task_review", "entity_id": "8"}]
 
 
-def test_task_edit_invalidates_older_manager_approval():
+def test_task_revision_invalidates_older_manager_approval_without_timestamps():
     from app.repositories.collaboration import CollaborationRepository
 
     class Result:
@@ -178,20 +178,203 @@ def test_task_edit_invalidates_older_manager_approval():
     class Connection:
         def execute(self, query, params=()):
             normalized = " ".join(query.split()).lower()
-            invalidates_old_review = (
-                "select distinct on (task_id) task_id, decision, reviewed_at" in normalized
-                and "with all_tasks as" in normalized
-                and "select max(updated_at) from all_tasks" in normalized
-                and "updated_at" in normalized
-                and ("< task.updated_at" in normalized or ">= task.updated_at" in normalized)
+            uses_revision_invariant = (
+                "task_revision" in normalized
+                and "task.revision" in normalized
+                and "updated_at" not in normalized
             )
-            return Result({"approved": not invalidates_old_review})
+            return Result({"approved": not uses_revision_invariant})
 
     @contextmanager
     def connection_factory():
         yield Connection()
 
     assert CollaborationRepository(connection_factory).approvals_complete(1) is False
+
+
+def test_task_update_monotonically_increments_revision():
+    from app.repositories.collaboration import CollaborationRepository
+
+    class Result:
+        def __init__(self, row=None):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    class Connection:
+        def __init__(self):
+            self.update_query = None
+
+        def execute(self, query, params=()):
+            if "SELECT voc_request_id" in query:
+                return Result({"voc_request_id": 3})
+            if "FROM public.voc_requests" in query and "FOR UPDATE" in query:
+                return Result({"id": 3})
+            if "FROM public.department_tasks" in query and "FOR UPDATE" in query:
+                return Result({"id": 5, "voc_request_id": 3, "revision": 4})
+            if "UPDATE public.department_tasks" in query:
+                self.update_query = " ".join(query.split()).lower()
+                return Result({"id": 5, "voc_request_id": 3, "revision": 5})
+            return Result()
+
+    connection = Connection()
+
+    @contextmanager
+    def connection_factory():
+        yield connection
+
+    updated = CollaborationRepository(connection_factory).update_task(
+        5, {"status": "completed"}, "Kim"
+    )
+
+    assert updated["revision"] == 5
+    assert "revision = revision + 1" in connection.update_query
+
+
+def test_final_approval_requires_fresh_manager_approvals_in_locked_round():
+    from app.repositories.collaboration import ApprovalRequired, CollaborationRepository
+
+    class Result:
+        def __init__(self, row=None):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    class Connection:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, query, params=()):
+            self.calls.append((query, params))
+            if "SELECT voc_request_id" in query:
+                return Result({"voc_request_id": 3})
+            if "FROM public.voc_requests" in query and "FOR UPDATE" in query:
+                return Result({"id": 3})
+            if "FROM public.department_tasks" in query and "FOR UPDATE" in query:
+                return Result({"id": 5, "voc_request_id": 3, "revision": 2})
+            if "master_final_approvers" in query:
+                return Result({"name": "Kim"})
+            if "AS approved" in query:
+                return Result({"approved": False})
+            raise AssertionError("final review must not be inserted")
+
+    connection = Connection()
+
+    @contextmanager
+    def connection_factory():
+        yield connection
+
+    with pytest.raises(ApprovalRequired):
+        CollaborationRepository(connection_factory).review_task(
+            5,
+            {"reviewer_role": "final_approver", "decision": "approved"},
+            "Kim",
+        )
+
+    assert any("FOR UPDATE" in query for query, _ in connection.calls)
+    assert not any("INSERT INTO public.task_reviews" in query for query, _ in connection.calls)
+
+
+def test_customer_reply_requires_final_review_after_every_manager_review():
+    from app.repositories.collaboration import CollaborationRepository
+
+    class Result:
+        def __init__(self, row):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    class Connection:
+        def execute(self, query, params=()):
+            normalized = " ".join(query.split()).lower()
+            if "latest_final as" not in normalized:
+                return Result(
+                    {
+                        "approved": "task_revision" in normalized
+                        and "task.revision" in normalized
+                    }
+                )
+            ordered = (
+                "task_revision" in normalized
+                and "task.revision" in normalized
+                and "final" in normalized
+                and "manager" in normalized
+                and "reviewed_at" not in normalized
+                and (
+                    "final.id >" in normalized
+                    or "final_review.id >" in normalized
+                    or "final_review_id >" in normalized
+                )
+            )
+            return Result({"approved": ordered})
+
+    @contextmanager
+    def connection_factory():
+        yield Connection()
+
+    assert CollaborationRepository(connection_factory).approvals_complete(3) is True
+
+
+def test_fixed_final_approver_is_revalidated_inside_locked_review_transaction():
+    from app.repositories.collaboration import (
+        CollaborationRepository,
+        FinalApproverMismatch,
+    )
+
+    class Result:
+        def __init__(self, row=None):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    class Connection:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, query, params=()):
+            self.calls.append((query, params))
+            if "SELECT voc_request_id" in query:
+                return Result({"voc_request_id": 3})
+            if "FROM public.voc_requests" in query and "FOR UPDATE" in query:
+                return Result({"id": 3})
+            if "FROM public.department_tasks" in query and "FOR UPDATE" in query:
+                return Result({"id": 5, "voc_request_id": 3, "revision": 2})
+            if "master_final_approvers" in query:
+                return Result(None)
+            raise AssertionError("unconfigured final approver must not insert review")
+
+    connection = Connection()
+    entries = 0
+
+    @contextmanager
+    def connection_factory():
+        nonlocal entries
+        entries += 1
+        yield connection
+
+    with pytest.raises(FinalApproverMismatch):
+        CollaborationRepository(connection_factory).review_task(
+            5,
+            {"reviewer_role": "final_approver", "decision": "approved"},
+            "Kim",
+        )
+
+    assert entries == 1
+    round_lock = next(
+        index
+        for index, (query, _) in enumerate(connection.calls)
+        if "FROM public.voc_requests" in query and "FOR UPDATE" in query
+    )
+    identity_check = next(
+        index
+        for index, (query, _) in enumerate(connection.calls)
+        if "master_final_approvers" in query
+    )
+    assert round_lock < identity_check
 
 
 def test_customer_reply_approval_check_and_stage_change_share_locked_transaction():
