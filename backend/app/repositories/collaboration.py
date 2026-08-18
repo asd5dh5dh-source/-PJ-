@@ -631,3 +631,138 @@ class CollaborationRepository:
                 }
             )
         return {"case_id": case_id, "rounds": expanded, "audits": audits}
+
+    def dashboard(self, date_from, date_to) -> dict[str, list[dict[str, Any]]]:
+        with self.connection_factory() as connection:
+            stage_counts = connection.execute(
+                """
+                SELECT stage, count(*)::integer AS count
+                FROM public.voc_requests
+                WHERE created_at::date BETWEEN %s AND %s
+                  AND stage NOT IN ('cancelled', 'deleted')
+                GROUP BY stage ORDER BY stage
+                """,
+                (date_from, date_to),
+            ).fetchall()
+            due_tasks = connection.execute(
+                """
+                SELECT task.*, request.case_id, request.priority, request.stage
+                FROM public.department_tasks AS task
+                JOIN public.voc_requests AS request ON request.id = task.voc_request_id
+                WHERE task.status NOT IN ('completed', 'excluded')
+                  AND request.stage NOT IN ('completed', 'cancelled', 'deleted')
+                  AND task.due_date <= %s + 2
+                ORDER BY task.due_date, task.id
+                """,
+                (date_to,),
+            ).fetchall()
+            recent_requests = connection.execute(
+                """
+                SELECT * FROM public.voc_requests
+                WHERE created_at::date BETWEEN %s AND %s
+                  AND stage NOT IN ('cancelled', 'deleted')
+                ORDER BY created_at DESC, id DESC
+                """,
+                (date_from, date_to),
+            ).fetchall()
+        return {
+            "stage_counts": stage_counts,
+            "due_tasks": due_tasks,
+            "recent_requests": recent_requests,
+        }
+
+    def list_notifications(self) -> list[dict[str, Any]]:
+        with self.connection_factory() as connection:
+            return connection.execute(
+                "SELECT * FROM public.notification_logs ORDER BY created_at DESC, id DESC LIMIT 200"
+            ).fetchall()
+
+    def record_notification(self, values: dict[str, Any]) -> dict[str, Any]:
+        columns = tuple(values)
+        params = tuple(
+            Jsonb(value) if column == "recipients" else value
+            for column, value in values.items()
+        )
+        with self.connection_factory() as connection:
+            return connection.execute(
+                f"INSERT INTO public.notification_logs ({', '.join(columns)}) "
+                f"VALUES ({', '.join(['%s'] * len(columns))}) RETURNING *",
+                params,
+            ).fetchone()
+
+    _MASTER_TABLES = {
+        "customers": ("master_customers", {"name", "active"}),
+        "products": ("master_products", {"name", "active"}),
+        "voc_types": ("master_voc_types", {"voc_type", "voc_subtype", "active"}),
+        "people": (
+            "master_people",
+            {"department", "name", "email", "role", "active"},
+        ),
+        "final_approver": ("master_final_approvers", {"person_id"}),
+        "templates": (
+            "master_templates",
+            {"template_key", "subject_template", "body_template", "active"},
+        ),
+        "notification_settings": (
+            "master_notification_settings",
+            {"weekday_time", "timezone_name"},
+        ),
+    }
+
+    def list_master_data(self, resource: str) -> list[dict[str, Any]]:
+        table, _ = self._MASTER_TABLES[resource]
+        with self.connection_factory() as connection:
+            return connection.execute(
+                f"SELECT * FROM public.{table} ORDER BY 1"
+            ).fetchall()
+
+    def create_master_data(
+        self, resource: str, values: dict[str, Any], writer_name: str
+    ) -> dict[str, Any]:
+        table, allowed = self._MASTER_TABLES[resource]
+        selected = {key: value for key, value in values.items() if key in allowed}
+        if resource in {"final_approver", "templates", "notification_settings"}:
+            selected["updated_by"] = writer_name
+        with self.connection_factory() as connection:
+            before = None
+            conflict_column = None
+            if resource in {"final_approver", "notification_settings"}:
+                before = connection.execute(
+                    f"SELECT * FROM public.{table} WHERE singleton_id = 1 FOR UPDATE"
+                ).fetchone()
+                selected = {"singleton_id": 1, **selected}
+                conflict_column = "singleton_id"
+            elif resource == "templates":
+                before = connection.execute(
+                    f"SELECT * FROM public.{table} WHERE template_key = %s FOR UPDATE",
+                    (selected["template_key"],),
+                ).fetchone()
+                conflict_column = "template_key"
+            columns = tuple(selected)
+            upsert = ""
+            if conflict_column:
+                updates = ", ".join(
+                    f"{column} = EXCLUDED.{column}"
+                    for column in columns
+                    if column != conflict_column
+                )
+                upsert = (
+                    f" ON CONFLICT ({conflict_column}) DO UPDATE SET {updates}, "
+                    "updated_at = now()"
+                )
+            created = connection.execute(
+                f"INSERT INTO public.{table} ({', '.join(columns)}) "
+                f"VALUES ({', '.join(['%s'] * len(columns))}){upsert} RETURNING *",
+                tuple(selected.values()),
+            ).fetchone()
+            entity_id = created.get("id", created.get("singleton_id", 1))
+            self._audit(
+                connection,
+                f"master_{resource}",
+                entity_id,
+                "updated" if before else "created",
+                before,
+                created,
+                writer_name,
+            )
+        return created

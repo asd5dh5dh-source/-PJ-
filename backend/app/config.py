@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     voc_db_name: str = "학습용 Data"
     voc_db_user: str = "postgres"
     voc_db_password: SecretStr = SecretStr("")
+    voc_smtp_host: str = ""
+    voc_smtp_port: int = 25
+    voc_smtp_username: str = ""
+    voc_smtp_password: SecretStr = SecretStr("")
+    voc_smtp_from: str = ""
 
     @model_validator(mode="before")
     @classmethod
@@ -41,6 +46,12 @@ class Settings(BaseSettings):
     @property
     def mail_delivery_enabled(self) -> bool:
         return self.runtime_profile == "internal"
+
+    @property
+    def smtp_configured(self) -> bool:
+        return self.mail_delivery_enabled and bool(
+            self.voc_smtp_host and self.voc_smtp_from
+        )
 
     def database_dsn(self) -> str:
         database_url = self.voc_database_url.get_secret_value()

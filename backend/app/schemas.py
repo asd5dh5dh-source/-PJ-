@@ -161,3 +161,7 @@ class VocStageUpdate(BaseModel):
         if self.stage == "deleted" and self.deletion_reason is None:
             raise ValueError("deletion_reason is required")
         return self
+
+
+class TranslationRequest(BaseModel):
+    text: NonEmptyText
