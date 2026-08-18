@@ -5,7 +5,7 @@ export default function AppShell({
   activeSection = "archive",
 }: {
   children: ReactNode;
-  activeSection?: "archive" | "new-request";
+  activeSection?: "archive" | "new-request" | "voc";
 }) {
   return (
     <div className="app-shell">
@@ -18,6 +18,7 @@ export default function AppShell({
         <nav aria-label="업무 메뉴">
           <a href="/archive" aria-current={activeSection === "archive" ? "page" : undefined}>VOC 아카이브</a>
           <a href="/requests/new" aria-current={activeSection === "new-request" ? "page" : undefined}>신규 요청</a>
+          <a href="/" aria-current={activeSection === "voc" ? "page" : undefined}>VOC 관리</a>
         </nav>
         <p className="sidebar-note">사내 VOC 검색</p>
       </div>
