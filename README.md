@@ -82,6 +82,8 @@ npm run build
 npx playwright test e2e/local-voc.spec.ts
 ```
 
+Locally, Playwright reuses the Next.js server started in step 5. In CI, it starts an isolated server and refuses to reuse a process already listening on port 3000.
+
 When database credentials are intentionally unavailable, the safe backend-only subset is:
 
 ```powershell

@@ -26,7 +26,7 @@ test("training archive can be searched without creating records", async ({ page 
       return;
     }
 
-    const searched = new URL(request.url()).searchParams.has("q");
+    const searched = new URL(request.url()).searchParams.get("q") === "gas generation";
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -41,8 +41,14 @@ test("training archive can be searched without creating records", async ({ page 
 
   await page.goto("/archive");
   await page.getByRole("searchbox").fill("gas generation");
+  const searchRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/archive" && url.searchParams.get("q") === "gas generation";
+  });
   await page.getByRole("button", { name: "검색" }).click();
+  const request = await searchRequest;
 
+  expect(new URL(request.url()).searchParams.get("q")).toBe("gas generation");
   await expect(page.getByTestId("archive-result").first()).toBeVisible();
   await expect(page.getByText("관련도순", { exact: true }).last()).toBeVisible();
   expect(writeRequests).toEqual([]);
