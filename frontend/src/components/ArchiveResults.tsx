@@ -52,7 +52,7 @@ export default function ArchiveResults({
           </thead>
           <tbody>
             {data.items.map((item) => (
-              <tr key={item.case_id} className={selectedCaseId === item.case_id ? "selected-row" : undefined}>
+              <tr key={item.case_id} data-testid="archive-result" className={selectedCaseId === item.case_id ? "selected-row" : undefined}>
                 <td><button className="case-link" type="button" onClick={() => onSelect(item.case_id)} aria-pressed={selectedCaseId === item.case_id}>{item.case_id}</button></td>
                 <td>{text(item.customer_name)}</td>
                 <td>{text(item.product_equipment)}</td>

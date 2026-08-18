@@ -6,6 +6,7 @@ dependencies = [
   "pydantic-settings>=2,<3",
   "psycopg[binary]>=3,<4",
   "fastapi>=0.115,<1",
+  "uvicorn>=0.35,<1",
 ]
 
 [dependency-groups]
