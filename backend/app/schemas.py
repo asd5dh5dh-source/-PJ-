@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, StringConstraints, model_validator
@@ -165,3 +165,33 @@ class VocStageUpdate(BaseModel):
 
 class TranslationRequest(BaseModel):
     text: NonEmptyText
+
+
+class DashboardStageCount(BaseModel):
+    stage: VocStage
+    count: int = Field(ge=0)
+
+
+class DashboardDueTask(BaseModel):
+    id: int
+    case_id: str | None = None
+    department: str | None = None
+    status: TaskStatus
+    due_date: date | None = None
+    priority: Literal["normal", "high"] | None = None
+    stage: VocStage | None = None
+
+
+class DashboardRecentRequest(BaseModel):
+    case_id: str
+    sender_company: str | None = None
+    product_equipment: str | None = None
+    priority: Literal["normal", "high"] | None = None
+    stage: VocStage | None = None
+    created_at: datetime | None = None
+
+
+class DashboardResponse(BaseModel):
+    stage_counts: list[DashboardStageCount]
+    due_tasks: list[DashboardDueTask]
+    recent_requests: list[DashboardRecentRequest]

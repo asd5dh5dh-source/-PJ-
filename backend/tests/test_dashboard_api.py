@@ -45,6 +45,9 @@ class OperationsRepository:
     def list_notifications(self):
         return self.notifications
 
+    def list_daily_notification_task_ids(self):
+        return []
+
     def list_master_data(self, resource):
         return self.master[resource]
 
@@ -92,6 +95,50 @@ def test_dashboard_defaults_to_recent_thirty_days(client, repository):
     assert response.json()["recent_requests"] == [{"case_id": "VOC-2026-0002"}]
 
 
+def test_dashboard_strips_sensitive_request_and_task_fields(client, repository):
+    repository.dashboard = lambda date_from, date_to: {
+        "stage_counts": [{"stage": "received", "count": 1, "internal": "secret"}],
+        "due_tasks": [
+            {
+                "id": 4,
+                "case_id": "VOC-2026-0002",
+                "department": "Quality",
+                "status": "delayed",
+                "sender_email": "private@example.com",
+                "response_content": "private response",
+            }
+        ],
+        "recent_requests": [
+            {
+                "case_id": "VOC-2026-0002",
+                "sender_company": "Acme",
+                "stage": "received",
+                "original_mail_body": "private mail",
+                "translation_draft": "private translation",
+            }
+        ],
+    }
+
+    payload = client.get("/api/dashboard").json()
+
+    assert payload["stage_counts"] == [{"stage": "received", "count": 1}]
+    assert payload["due_tasks"] == [
+        {
+            "id": 4,
+            "case_id": "VOC-2026-0002",
+            "department": "Quality",
+            "status": "delayed",
+        }
+    ]
+    assert payload["recent_requests"] == [
+        {
+            "case_id": "VOC-2026-0002",
+            "sender_company": "Acme",
+            "stage": "received",
+        }
+    ]
+
+
 def test_dashboard_accepts_custom_date_range(client, repository):
     response = client.get(
         "/api/dashboard",
@@ -130,6 +177,17 @@ def test_notifications_are_public_read_only(client):
 
     assert response.status_code == 200
     assert response.json() == [{"id": 1, "delivery_status": "preview"}]
+
+
+def test_daily_notification_processor_requires_writer_and_is_explicit_post(client):
+    assert client.post("/api/notifications/process-daily").status_code == 401
+
+    response = client.post(
+        "/api/notifications/process-daily", headers=WRITER_HEADERS
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"queued": 0}
 
 
 def test_external_translate_endpoint_returns_preview_without_model(client):
@@ -225,3 +283,42 @@ def test_fixed_approver_change_updates_singleton_and_audits_previous_value():
     )
     assert audit_params[3].obj["person_id"] == 4
     assert audit_params[4].obj["person_id"] == 8
+
+
+def test_dashboard_repository_counts_only_current_rounds_in_requested_window():
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def fetchall(self):
+            return self.rows
+
+    class Connection:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, query, params=()):
+            normalized = " ".join(query.split())
+            self.calls.append((normalized, params))
+            if "GROUP BY stage" in normalized:
+                count = 1 if "DISTINCT ON (case_id)" in normalized else 2
+                return Result([{"stage": "received", "count": count}])
+            if "FROM public.department_tasks" in normalized:
+                return Result([])
+            return Result([])
+
+    connection = Connection()
+
+    @contextmanager
+    def connection_factory():
+        yield connection
+
+    payload = CollaborationRepository(connection_factory).dashboard(
+        date(2026, 8, 1), date(2026, 8, 18)
+    )
+
+    assert payload["stage_counts"] == [{"stage": "received", "count": 1}]
+    assert all(
+        date(2026, 8, 1) in params and date(2026, 8, 18) in params
+        for _, params in connection.calls
+    )

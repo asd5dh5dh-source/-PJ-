@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     voc_smtp_username: str = ""
     voc_smtp_password: SecretStr = SecretStr("")
     voc_smtp_from: str = ""
+    voc_translation_command: str = Field(
+        default="", validation_alias="VOC_TRANSLATION_COMMAND"
+    )
+    voc_translation_model_path: str = Field(
+        default="", validation_alias="VOC_TRANSLATION_MODEL_PATH"
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -51,6 +57,12 @@ class Settings(BaseSettings):
     def smtp_configured(self) -> bool:
         return self.mail_delivery_enabled and bool(
             self.voc_smtp_host and self.voc_smtp_from
+        )
+
+    @property
+    def translation_configured(self) -> bool:
+        return self.runtime_profile == "internal" and bool(
+            self.voc_translation_command and self.voc_translation_model_path
         )
 
     def database_dsn(self) -> str:

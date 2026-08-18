@@ -227,6 +227,13 @@ $$;
 CREATE INDEX IF NOT EXISTS idx_notification_logs_schedule
     ON public.notification_logs (delivery_status, scheduled_at);
 
+ALTER TABLE public.notification_logs
+    ADD COLUMN IF NOT EXISTS event_key text,
+    ADD COLUMN IF NOT EXISTS dedupe_key text;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_logs_dedupe
+    ON public.notification_logs (dedupe_key);
+
 CREATE TABLE IF NOT EXISTS public.master_customers (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name text NOT NULL UNIQUE CHECK (btrim(name) <> ''),

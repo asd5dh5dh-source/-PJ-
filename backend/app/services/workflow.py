@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from datetime import date
+import logging
 from typing import Any
 
 from fastapi import HTTPException
@@ -15,22 +16,29 @@ from app.repositories.collaboration import (
 from app.services.mail_parser import parse_sender
 
 
+logger = logging.getLogger(__name__)
+
+
 class WorkflowService:
     def __init__(
         self,
         repository: Any,
         today: Callable[[], date] = date.today,
+        notification_service: Any | None = None,
     ):
         self.repository = repository
         self.today = today
+        self.notification_service = notification_service
 
     def create_voc(self, values: dict[str, Any], writer_name: str):
         values = dict(values)
         tasks = values.pop("tasks", []) or []
         self._apply_sender(values)
-        return self.repository.create_voc(
+        created = self.repository.create_voc(
             values, tasks, writer_name, self.today().year
         )
+        self._notify(created.get("tasks", []), "assigned")
+        return created
 
     def create_round(
         self, case_id: str, values: dict[str, Any], writer_name: str
@@ -51,7 +59,17 @@ class WorkflowService:
             raise HTTPException(status_code=409, detail=str(error)) from error
         if created is None:
             raise HTTPException(status_code=404, detail="VOC not found")
+        self._notify(created.get("tasks", []), "reopened")
         return created
+
+    def _notify(self, tasks: list[dict[str, Any]], event: str) -> None:
+        if self.notification_service is None:
+            return
+        for task in tasks:
+            try:
+                self.notification_service.queue_task(task["id"], event)
+            except Exception:
+                logger.exception("Failed to queue %s notification for task %s", event, task["id"])
 
     def update_task(
         self, task_id: int, changes: dict[str, Any], writer_name: str

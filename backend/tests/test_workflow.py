@@ -720,3 +720,58 @@ def test_task_update_locks_parent_round_before_task_mutation():
         if "FROM public.department_tasks" in query and "FOR UPDATE" in query
     )
     assert round_lock < task_lock
+
+
+def test_new_voc_assignments_are_forwarded_to_notification_service():
+    from app.services.workflow import WorkflowService
+
+    class Repository:
+        def create_voc(self, values, tasks, writer_name, year):
+            return {
+                "case_id": "VOC-2026-0001",
+                "tasks": [{"id": 7, "priority": "high"}],
+            }
+
+    class Notifications:
+        def __init__(self):
+            self.calls = []
+
+        def queue_task(self, task_id, event):
+            self.calls.append((task_id, event))
+
+    notifications = Notifications()
+    WorkflowService(
+        Repository(),
+        today=lambda: date(2026, 8, 18),
+        notification_service=notifications,
+    ).create_voc(
+        {"customer_request": "Investigate", "tasks": [{"department": "Quality"}]},
+        "Kim",
+    )
+
+    assert notifications.calls == [(7, "assigned")]
+
+
+def test_reopened_round_tasks_are_forwarded_to_notification_service():
+    from app.services.workflow import WorkflowService
+
+    class Repository:
+        def get_case(self, case_id):
+            return {"case_id": case_id, "rounds": [{"stage": "customer_reply"}]}
+
+        def create_round(self, case_id, values, writer_name):
+            return {"case_id": case_id, "tasks": [{"id": 8}, {"id": 9}]}
+
+    class Notifications:
+        def __init__(self):
+            self.calls = []
+
+        def queue_task(self, task_id, event):
+            self.calls.append((task_id, event))
+
+    notifications = Notifications()
+    WorkflowService(
+        Repository(), notification_service=notifications
+    ).create_round("VOC-2026-0001", {"customer_request": "Follow up"}, "Kim")
+
+    assert notifications.calls == [(8, "reopened"), (9, "reopened")]

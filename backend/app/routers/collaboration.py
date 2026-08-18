@@ -18,9 +18,10 @@ from app.services.workflow import WorkflowService
 def create_collaboration_router(
     repository: Any,
     today: Callable[[], date] = date.today,
+    notification_service: Any | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api", tags=["collaboration"])
-    workflow = WorkflowService(repository, today)
+    workflow = WorkflowService(repository, today, notification_service)
 
     @router.post("/voc", status_code=status.HTTP_201_CREATED)
     def create_voc(

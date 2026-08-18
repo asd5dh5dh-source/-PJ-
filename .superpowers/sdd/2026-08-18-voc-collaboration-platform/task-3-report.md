@@ -57,3 +57,28 @@ No XLSX dependency was installed in the existing backend environment, and the br
 ## Known environment limitation
 
 The two pre-existing `@pytest.mark.localdb` tests still require local PostgreSQL credentials unavailable in this worktree (`fe_sendauth: no password supplied`). They were not changed; the agreed non-local regression suite passes.
+
+## Review correction pass
+
+### Changes
+
+- Wired high-priority assignment and follow-up-round reopen alerts into `WorkflowService`; notification failures are logged without turning an already-committed VOC mutation into a retryable failure.
+- Added a writer-gated `POST /api/notifications/process-daily` command while keeping notification `GET` read-only.
+- Notification context now comes from managed final approver, weekday time/timezone, and event/default templates. Missing templates safely use built-in content.
+- Added `event_key`/`dedupe_key` columns plus a unique dedupe index. The service atomically claims the log row before SMTP, so concurrent/repeated assignment, reopen, or daily processing cannot dispatch twice.
+- Added explicit internal-only local CPU translation configuration (`VOC_TRANSLATION_COMMAND`, `VOC_TRANSLATION_MODEL_PATH`) and a no-shell subprocess adapter. External review and Korean input return before adapter execution.
+- Dashboard responses now use allowlisted aggregate/minimal descriptor models. Repository queries count only the latest round of each VOC and apply the requested date range to stage, due-task, and recent-request panels.
+- CSV formula-like cells are prefixed with an apostrophe. XLSX values remove XML 1.0-invalid control characters before escaping.
+
+### TDD evidence
+
+Focused RED runs reproduced missing export sanitization (`2 failed`), dashboard field filtering/current-round counts (`2 failed`), translation adapter configuration (`2 failed`), alert workflow/service/daily routing (`8 failed` after test-fixture correction), and missing-template fallback (`1 failed`). Each focused test passed after its minimal production change.
+
+Final review verification:
+
+```text
+uv run pytest -m "not localdb" -q
+145 passed, 2 deselected in 2.62s
+```
+
+The two deselected tests remain the unchanged credentialed local-PostgreSQL limitation above.

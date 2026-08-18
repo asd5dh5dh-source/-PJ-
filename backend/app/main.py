@@ -14,6 +14,8 @@ from app.routers.dashboard import create_dashboard_router
 from app.routers.export import create_export_router
 from app.routers.requests import create_requests_router
 from app.services.search import ArchiveSearchService
+from app.services.notifications import NotificationService
+from app.config import get_settings
 
 
 def create_app(
@@ -28,15 +30,24 @@ def create_app(
         else CollaborationRepository()
     )
     search_service = ArchiveSearchService(repository)
+    notification_service = NotificationService(
+        collaboration_repository, get_settings()
+    )
     app = FastAPI(title="Local VOC Archive")
     app.include_router(writer_router)
     app.include_router(create_archive_router(repository, search_service))
     app.include_router(create_export_router(repository))
     app.include_router(create_requests_router(repository, search_service, receipt_date))
     app.include_router(
-        create_collaboration_router(collaboration_repository, receipt_date)
+        create_collaboration_router(
+            collaboration_repository, receipt_date, notification_service
+        )
     )
-    app.include_router(create_dashboard_router(collaboration_repository, receipt_date))
+    app.include_router(
+        create_dashboard_router(
+            collaboration_repository, receipt_date, notification_service
+        )
+    )
     app.include_router(create_admin_router(collaboration_repository))
     return app
 

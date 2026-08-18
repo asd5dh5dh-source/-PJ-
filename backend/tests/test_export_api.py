@@ -1,6 +1,7 @@
 import csv
 from datetime import date
 from io import StringIO
+from xml.etree.ElementTree import fromstring
 from zipfile import ZipFile
 from io import BytesIO
 
@@ -122,3 +123,23 @@ def test_xlsx_export_is_a_valid_single_sheet_office_archive(client):
         sheet = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
     assert "COM-001" in sheet
     assert "알파" in sheet
+
+
+def test_csv_export_prefixes_formula_like_values(client, monkeypatch):
+    monkeypatch.setitem(CASES[0], "customer_name", "=HYPERLINK(\"bad\")")
+
+    response = client.get("/api/export/archive.csv", headers=WRITER_HEADERS)
+    row = next(csv.DictReader(StringIO(response.content.decode("utf-8-sig"))))
+
+    assert row["customer_name"] == "'=HYPERLINK(\"bad\")"
+
+
+def test_xlsx_export_removes_xml_invalid_control_characters(client, monkeypatch):
+    monkeypatch.setitem(CASES[0], "customer_request", "bad\x00control")
+
+    response = client.get("/api/export/archive.xlsx", headers=WRITER_HEADERS)
+    with ZipFile(BytesIO(response.content)) as workbook:
+        sheet = workbook.read("xl/worksheets/sheet1.xml")
+
+    fromstring(sheet)
+    assert b"\x00" not in sheet

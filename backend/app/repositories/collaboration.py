@@ -636,8 +636,13 @@ class CollaborationRepository:
         with self.connection_factory() as connection:
             stage_counts = connection.execute(
                 """
+                WITH latest_requests AS (
+                    SELECT DISTINCT ON (case_id) case_id, stage, created_at
+                    FROM public.voc_requests
+                    ORDER BY case_id, round_number DESC
+                )
                 SELECT stage, count(*)::integer AS count
-                FROM public.voc_requests
+                FROM latest_requests
                 WHERE created_at::date BETWEEN %s AND %s
                   AND stage NOT IN ('cancelled', 'deleted')
                 GROUP BY stage ORDER BY stage
@@ -646,22 +651,39 @@ class CollaborationRepository:
             ).fetchall()
             due_tasks = connection.execute(
                 """
-                SELECT task.*, request.case_id, request.priority, request.stage
+                WITH latest_requests AS (
+                    SELECT DISTINCT ON (case_id)
+                           id, case_id, priority, stage, created_at
+                    FROM public.voc_requests
+                    ORDER BY case_id, round_number DESC
+                )
+                SELECT task.id, request.case_id, task.department, task.status,
+                       task.due_date, request.priority, request.stage
                 FROM public.department_tasks AS task
-                JOIN public.voc_requests AS request ON request.id = task.voc_request_id
+                JOIN latest_requests AS request ON request.id = task.voc_request_id
                 WHERE task.status NOT IN ('completed', 'excluded')
                   AND request.stage NOT IN ('completed', 'cancelled', 'deleted')
+                  AND request.created_at::date BETWEEN %s AND %s
                   AND task.due_date <= %s + 2
                 ORDER BY task.due_date, task.id
                 """,
-                (date_to,),
+                (date_from, date_to, date_to),
             ).fetchall()
             recent_requests = connection.execute(
                 """
-                SELECT * FROM public.voc_requests
+                WITH latest_requests AS (
+                    SELECT DISTINCT ON (case_id)
+                           case_id, sender_company, product_equipment,
+                           priority, stage, created_at
+                    FROM public.voc_requests
+                    ORDER BY case_id, round_number DESC
+                )
+                SELECT case_id, sender_company, product_equipment,
+                       priority, stage, created_at
+                FROM latest_requests
                 WHERE created_at::date BETWEEN %s AND %s
                   AND stage NOT IN ('cancelled', 'deleted')
-                ORDER BY created_at DESC, id DESC
+                ORDER BY created_at DESC, case_id DESC
                 """,
                 (date_from, date_to),
             ).fetchall()
@@ -689,6 +711,85 @@ class CollaborationRepository:
                 f"VALUES ({', '.join(['%s'] * len(columns))}) RETURNING *",
                 params,
             ).fetchone()
+
+    def claim_notification(self, values: dict[str, Any]) -> dict[str, Any] | None:
+        columns = tuple(values)
+        params = tuple(
+            Jsonb(value) if column == "recipients" else value
+            for column, value in values.items()
+        )
+        with self.connection_factory() as connection:
+            return connection.execute(
+                f"INSERT INTO public.notification_logs ({', '.join(columns)}) "
+                f"VALUES ({', '.join(['%s'] * len(columns))}) "
+                "ON CONFLICT (dedupe_key) DO NOTHING RETURNING *",
+                params,
+            ).fetchone()
+
+    def update_notification_delivery(
+        self, notification_id: int, values: dict[str, Any]
+    ) -> dict[str, Any]:
+        assignments = ", ".join(f"{column} = %s" for column in values)
+        with self.connection_factory() as connection:
+            return connection.execute(
+                f"UPDATE public.notification_logs SET {assignments} "
+                "WHERE id = %s RETURNING *",
+                (*values.values(), notification_id),
+            ).fetchone()
+
+    def get_notification_context(
+        self, task_id: int, event: str
+    ) -> dict[str, Any] | None:
+        template_key = f"notification_{event}"
+        with self.connection_factory() as connection:
+            return connection.execute(
+                """
+                SELECT task.id, task.voc_request_id, task.department,
+                       task.assignee_email, task.manager_email, task.due_date,
+                       task.ecm_link, request.case_id, request.sender_company AS customer_name,
+                       request.product_equipment, request.customer_request AS request_title,
+                       request.stage, request.priority,
+                       approver.email AS final_approver_email,
+                       coalesce(setting.weekday_time, '09:00'::time) AS weekday_time,
+                       coalesce(setting.timezone_name, 'Asia/Seoul') AS timezone_name,
+                       template.subject_template, template.body_template
+                FROM public.department_tasks AS task
+                JOIN public.voc_requests AS request ON request.id = task.voc_request_id
+                LEFT JOIN public.master_final_approvers AS final ON final.singleton_id = 1
+                LEFT JOIN public.master_people AS approver
+                       ON approver.id = final.person_id AND approver.active
+                LEFT JOIN public.master_notification_settings AS setting
+                       ON setting.singleton_id = 1
+                LEFT JOIN LATERAL (
+                    SELECT subject_template, body_template
+                    FROM public.master_templates
+                    WHERE active AND template_key IN (%s, 'notification_default')
+                    ORDER BY (template_key = %s) DESC
+                    LIMIT 1
+                ) AS template ON true
+                WHERE task.id = %s
+                """,
+                (template_key, template_key, task_id),
+            ).fetchone()
+
+    def list_daily_notification_task_ids(self) -> list[int]:
+        with self.connection_factory() as connection:
+            rows = connection.execute(
+                """
+                WITH latest_requests AS (
+                    SELECT DISTINCT ON (case_id) id, case_id
+                    FROM public.voc_requests
+                    ORDER BY case_id, round_number DESC
+                )
+                SELECT task.id
+                FROM public.department_tasks AS task
+                JOIN latest_requests AS request ON request.id = task.voc_request_id
+                WHERE task.status NOT IN ('completed', 'excluded')
+                  AND task.due_date IS NOT NULL
+                ORDER BY task.id
+                """
+            ).fetchall()
+        return [row["id"] for row in rows]
 
     _MASTER_TABLES = {
         "customers": ("master_customers", {"name", "active"}),

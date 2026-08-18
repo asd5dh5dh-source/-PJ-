@@ -5,17 +5,23 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config import Settings, get_settings
-from app.schemas import TranslationRequest
+from app.auth import WriterContext, require_writer
+from app.schemas import DashboardResponse, TranslationRequest
 from app.services.translation import TranslationService
 
 
 def create_dashboard_router(
     repository: Any,
     today: Callable[[], date] = date.today,
+    notification_service: Any | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api", tags=["operations"])
 
-    @router.get("/dashboard")
+    @router.get(
+        "/dashboard",
+        response_model=DashboardResponse,
+        response_model_exclude_none=True,
+    )
     def dashboard(
         date_from: Annotated[date | None, Query()] = None,
         date_to: Annotated[date | None, Query()] = None,
@@ -36,6 +42,13 @@ def create_dashboard_router(
     @router.get("/notifications")
     def notifications():
         return repository.list_notifications()
+
+    @router.post("/notifications/process-daily")
+    def process_daily_notifications(
+        writer: Annotated[WriterContext, Depends(require_writer)],
+    ):
+        queued = notification_service.queue_daily() if notification_service else []
+        return {"queued": len(queued)}
 
     @router.post("/translate")
     def translate(

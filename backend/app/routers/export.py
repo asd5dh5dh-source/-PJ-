@@ -1,6 +1,7 @@
 import csv
 from datetime import date, datetime
 from io import BytesIO, StringIO
+import re
 from typing import Annotated, Any
 from xml.sax.saxutils import escape
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -23,6 +24,7 @@ EXPORT_COLUMNS = (
     "final_status",
     "record_origin",
 )
+XML_INVALID_CONTROLS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 
 def _archive_rows(repository: Any, query: ArchiveQuery) -> list[dict[str, Any]]:
@@ -36,8 +38,26 @@ def _archive_rows(repository: Any, query: ArchiveQuery) -> list[dict[str, Any]]:
 def _cell(value: Any, reference: str) -> str:
     if isinstance(value, (date, datetime)):
         value = value.isoformat()
-    text = "" if value is None else str(value)
+    text = _safe_text(value)
     return f'<c r="{reference}" t="inlineStr"><is><t>{escape(text)}</t></is></c>'
+
+
+def _safe_text(value: Any) -> str:
+    return XML_INVALID_CONTROLS.sub("", "" if value is None else str(value))
+
+
+def _csv_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sanitized = []
+    for row in rows:
+        values = {}
+        for column, value in row.items():
+            if isinstance(value, str):
+                value = _safe_text(value)
+                if value.lstrip().startswith(("=", "+", "-", "@")):
+                    value = "'" + value
+            values[column] = value
+        sanitized.append(values)
+    return sanitized
 
 
 def _xlsx(rows: list[dict[str, Any]]) -> bytes:
@@ -102,7 +122,7 @@ def create_export_router(repository: Any) -> APIRouter:
         stream = StringIO(newline="")
         csv_writer = csv.DictWriter(stream, fieldnames=EXPORT_COLUMNS)
         csv_writer.writeheader()
-        csv_writer.writerows(_archive_rows(repository, query))
+        csv_writer.writerows(_csv_rows(_archive_rows(repository, query)))
         return Response(
             content=stream.getvalue().encode("utf-8-sig"),
             media_type="text/csv",
