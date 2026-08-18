@@ -71,3 +71,91 @@ class ManualRequest(BaseModel):
 
 class SimilarCases(BaseModel):
     items: list[ArchiveItem]
+
+
+TaskStatus = Literal[
+    "not_started", "reviewing", "in_progress", "completed", "delayed", "excluded"
+]
+VocStage = Literal[
+    "received",
+    "managing",
+    "in_progress",
+    "department_work",
+    "department_review",
+    "manager_review",
+    "final_review",
+    "customer_reply",
+    "completed",
+    "cancelled",
+    "deleted",
+]
+
+
+class DepartmentTaskCreate(BaseModel):
+    department: NonEmptyText
+    assignee_name: NonEmptyText | None = None
+    assignee_email: NonEmptyText | None = None
+    manager_name: NonEmptyText | None = None
+    manager_email: NonEmptyText | None = None
+    due_date: date | None = None
+    ecm_link: NonEmptyText | None = None
+
+
+class VocCreate(BaseModel):
+    customer_request: NonEmptyText
+    original_mail_body: str = ""
+    sender_name: NonEmptyText | None = None
+    sender_email: NonEmptyText | None = None
+    sender_company: NonEmptyText | None = None
+    translation_draft: str | None = None
+    translation_final: str | None = None
+    voc_type: NonEmptyText | None = None
+    voc_subtype: NonEmptyText | None = None
+    product_equipment: NonEmptyText | None = None
+    priority: Literal["normal", "high"] = "normal"
+    tasks: list[DepartmentTaskCreate] = Field(default_factory=list)
+
+
+class VocRoundCreate(VocCreate):
+    tasks: list[DepartmentTaskCreate] | None = None
+
+
+class DepartmentTaskUpdate(BaseModel):
+    department: NonEmptyText | None = None
+    assignee_name: NonEmptyText | None = None
+    assignee_email: NonEmptyText | None = None
+    manager_name: NonEmptyText | None = None
+    manager_email: NonEmptyText | None = None
+    status: TaskStatus | None = None
+    response_content: NonEmptyText | None = None
+    due_date: date | None = None
+    delay_reason: NonEmptyText | None = None
+    ecm_link: NonEmptyText | None = None
+
+    @model_validator(mode="after")
+    def require_change(self):
+        if not self.model_fields_set:
+            raise ValueError("at least one task field is required")
+        return self
+
+
+class TaskReviewCreate(BaseModel):
+    reviewer_role: Literal["department_manager", "final_approver"]
+    decision: Literal["approved", "rejected"]
+    comment: NonEmptyText | None = None
+
+
+class VocStageUpdate(BaseModel):
+    stage: VocStage
+    reason: NonEmptyText | None = None
+    cancellation_reason: NonEmptyText | None = None
+    deletion_reason: NonEmptyText | None = None
+    ecm_link: NonEmptyText | None = None
+
+    @model_validator(mode="after")
+    def require_terminal_reason(self):
+        if self.stage == "cancelled" and self.cancellation_reason is None:
+            raise ValueError("cancellation_reason is required")
+        if self.stage == "deleted" and self.deletion_reason is None:
+            raise ValueError("deletion_reason is required")
+        return self
