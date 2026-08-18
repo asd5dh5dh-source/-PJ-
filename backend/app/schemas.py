@@ -134,7 +134,9 @@ class DepartmentTaskUpdate(BaseModel):
 
     @model_validator(mode="after")
     def require_change(self):
-        if not self.model_fields_set:
+        if not any(
+            getattr(self, field) is not None for field in self.model_fields_set
+        ):
             raise ValueError("at least one task field is required")
         return self
 

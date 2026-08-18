@@ -109,7 +109,11 @@ class MemoryCollaborationRepository:
         )
         return all(task["status"] == "completed" and task["id"] in manager_task_ids for task in active) and final_approved
 
-    def change_stage(self, case_id, values, writer_name):
+    def change_stage(self, case_id, values, writer_name, require_approvals=False):
+        if require_approvals and not self.approvals_complete(self.case["id"]):
+            from app.repositories.collaboration import ApprovalRequired
+
+            raise ApprovalRequired
         self.case["stage"] = values["stage"]
         self.audits.append(("voc_stage", case_id, writer_name))
         return deepcopy(self.case)
@@ -148,12 +152,28 @@ VOC_PAYLOAD = {
         "From: Jane Doe <jane@example.com>\n"
         "Company: Example Materials\n\nPlease investigate."
     ),
-    "tasks": [{"department": "Quality", "due_date": "2026-08-20"}],
+    "tasks": [
+        {
+            "department": "Quality",
+            "manager_name": "Kim",
+            "due_date": "2026-08-20",
+        }
+    ],
 }
 
 
 def test_voc_mutations_require_writer_headers(client):
     assert client.post("/api/voc", json=VOC_PAYLOAD).status_code == 401
+
+
+def test_null_task_update_is_rejected(client):
+    task_id = client.post("/api/voc", headers=WRITER_HEADERS, json=VOC_PAYLOAD).json()["tasks"][0]["id"]
+
+    response = client.post(
+        f"/api/tasks/{task_id}", headers=WRITER_HEADERS, json={"status": None}
+    )
+
+    assert response.status_code == 422
 
 
 def test_create_app_keeps_a_falsy_collaboration_repository():
@@ -188,7 +208,9 @@ def test_create_voc_issues_case_id_and_parses_sender_only(client):
     assert response.json()["tasks"][0]["status"] == "not_started"
 
 
-def test_follow_up_creates_second_round_and_reopens_prior_tasks(client):
+def test_follow_up_creates_second_round_and_reopens_prior_tasks(
+    client, collaboration_repository
+):
     created = client.post("/api/voc", headers=WRITER_HEADERS, json=VOC_PAYLOAD).json()
     task_id = created["tasks"][0]["id"]
     completed = client.post(
@@ -201,6 +223,7 @@ def test_follow_up_creates_second_round_and_reopens_prior_tasks(client):
         },
     )
     assert completed.status_code == 200
+    collaboration_repository.case["stage"] = "customer_reply"
 
     reply = client.post(
         f"/api/voc/{created['case_id']}/rounds",
@@ -213,8 +236,9 @@ def test_follow_up_creates_second_round_and_reopens_prior_tasks(client):
     assert reply.json()["tasks"][0]["status"] == "not_started"
 
 
-def test_customer_reply_requires_all_approvals(client):
+def test_customer_reply_requires_all_approvals(client, collaboration_repository):
     case_id = client.post("/api/voc", headers=WRITER_HEADERS, json=VOC_PAYLOAD).json()["case_id"]
+    collaboration_repository.case["stage"] = "final_review"
 
     response = client.post(
         f"/api/voc/{case_id}/stage",

@@ -34,6 +34,65 @@ TASK_COLUMNS = (
 )
 
 
+class ApprovalRequired(Exception):
+    pass
+
+
+class RoundNotAllowed(Exception):
+    pass
+
+
+class ReviewerMismatch(Exception):
+    pass
+
+
+class StageTransitionNotAllowed(Exception):
+    def __init__(self, status_code: int, detail: str):
+        self.status_code = status_code
+        self.detail = detail
+        super().__init__(detail)
+
+
+STAGES = [
+    "received",
+    "managing",
+    "in_progress",
+    "department_work",
+    "department_review",
+    "manager_review",
+    "final_review",
+    "customer_reply",
+    "completed",
+]
+TERMINAL_STAGES = {"cancelled", "deleted"}
+
+
+def validate_stage_transition(
+    current: str,
+    target: str,
+    reason: str | None = None,
+    terminal_reason: str | None = None,
+) -> None:
+    if current in TERMINAL_STAGES:
+        raise StageTransitionNotAllowed(409, "Terminal stage cannot change")
+    if target == current:
+        raise StageTransitionNotAllowed(422, "Stage is unchanged")
+    if target in TERMINAL_STAGES:
+        if not terminal_reason:
+            raise StageTransitionNotAllowed(
+                422, f"{target} stage requires its specific reason"
+            )
+        return
+    current_index = STAGES.index(current)
+    target_index = STAGES.index(target)
+    if target_index > current_index + 1:
+        raise StageTransitionNotAllowed(409, "Stage transition is not allowed")
+    if target_index < current_index and not reason:
+        raise StageTransitionNotAllowed(
+            422, "Reverse stage transitions require reason"
+        )
+
+
 class CollaborationRepository:
     def __init__(self, connection_factory: Callable = database_connection):
         self.connection_factory = connection_factory
@@ -131,6 +190,10 @@ class CollaborationRepository:
             ).fetchone()
             if previous is None:
                 return None
+            if previous["stage"] not in {"customer_reply", "completed"}:
+                raise RoundNotAllowed(
+                    "Follow-up rounds require customer_reply or completed stage"
+                )
             source = {
                 column: values.get(column, previous.get(column))
                 for column in REQUEST_COLUMNS
@@ -226,6 +289,23 @@ class CollaborationRepository:
                 (task_id,),
             ).fetchone()
 
+    @staticmethod
+    def _lock_task_round(connection, task_id: int) -> dict[str, Any] | None:
+        reference = connection.execute(
+            "SELECT voc_request_id FROM public.department_tasks WHERE id = %s",
+            (task_id,),
+        ).fetchone()
+        if reference is None:
+            return None
+        connection.execute(
+            "SELECT id FROM public.voc_requests WHERE id = %s FOR UPDATE",
+            (reference["voc_request_id"],),
+        )
+        return connection.execute(
+            "SELECT * FROM public.department_tasks WHERE id = %s FOR UPDATE",
+            (task_id,),
+        ).fetchone()
+
     def update_task(
         self, task_id: int, changes: dict[str, Any], writer_name: str
     ) -> dict[str, Any] | None:
@@ -235,10 +315,7 @@ class CollaborationRepository:
             if column in changes
         }
         with self.connection_factory() as connection:
-            before = connection.execute(
-                "SELECT * FROM public.department_tasks WHERE id = %s FOR UPDATE",
-                (task_id,),
-            ).fetchone()
+            before = self._lock_task_round(connection, task_id)
             if before is None:
                 return None
             assignments = ", ".join(f"{column} = %s" for column in selected)
@@ -262,10 +339,12 @@ class CollaborationRepository:
         self, task_id: int, values: dict[str, Any], writer_name: str
     ) -> dict[str, Any]:
         with self.connection_factory() as connection:
-            task = connection.execute(
-                "SELECT * FROM public.department_tasks WHERE id = %s FOR UPDATE",
-                (task_id,),
-            ).fetchone()
+            task = self._lock_task_round(connection, task_id)
+            if (
+                values["reviewer_role"] == "department_manager"
+                and task["manager_name"] != writer_name
+            ):
+                raise ReviewerMismatch
             review = connection.execute(
                 """
                 INSERT INTO public.task_reviews (
@@ -314,20 +393,26 @@ class CollaborationRepository:
 
     def approvals_complete(self, request_id: int) -> bool:
         with self.connection_factory() as connection:
-            row = connection.execute(
+            return self._approvals_complete(connection, request_id)
+
+    @staticmethod
+    def _approvals_complete(connection, request_id: int) -> bool:
+        row = connection.execute(
                 """
-                WITH active_tasks AS (
-                    SELECT id, status
+                WITH all_tasks AS (
+                    SELECT id, status, updated_at
                     FROM public.department_tasks
-                    WHERE voc_request_id = %s AND status <> 'excluded'
+                    WHERE voc_request_id = %s
+                ), active_tasks AS (
+                    SELECT * FROM all_tasks WHERE status <> 'excluded'
                 ), latest_manager AS (
-                    SELECT DISTINCT ON (task_id) task_id, decision
+                    SELECT DISTINCT ON (task_id) task_id, decision, reviewed_at
                     FROM public.task_reviews
                     WHERE voc_request_id = %s
                       AND reviewer_role = 'department_manager'
                     ORDER BY task_id, reviewed_at DESC, id DESC
                 ), latest_final AS (
-                    SELECT decision
+                    SELECT decision, reviewed_at
                     FROM public.task_reviews
                     WHERE voc_request_id = %s
                       AND reviewer_role = 'final_approver'
@@ -339,9 +424,14 @@ class CollaborationRepository:
                            LEFT JOIN latest_manager AS review ON review.task_id = task.id
                            WHERE task.status <> 'completed'
                               OR review.decision IS DISTINCT FROM 'approved'
+                              OR review.reviewed_at < task.updated_at
                        )
                        AND EXISTS (
-                           SELECT 1 FROM latest_final WHERE decision = 'approved'
+                           SELECT 1 FROM latest_final
+                           WHERE decision = 'approved'
+                             AND reviewed_at >= (
+                                 SELECT max(updated_at) FROM all_tasks
+                             )
                        ) AS approved
                 """,
                 (request_id, request_id, request_id),
@@ -364,7 +454,11 @@ class CollaborationRepository:
             )
 
     def change_stage(
-        self, case_id: str, values: dict[str, Any], writer_name: str
+        self,
+        case_id: str,
+        values: dict[str, Any],
+        writer_name: str,
+        require_approvals: bool = False,
     ) -> dict[str, Any] | None:
         with self.connection_factory() as connection:
             before = connection.execute(
@@ -378,6 +472,20 @@ class CollaborationRepository:
             ).fetchone()
             if before is None:
                 return None
+            validate_stage_transition(
+                before["stage"],
+                values["stage"],
+                values.get("reason"),
+                values.get(
+                    "cancellation_reason"
+                    if values["stage"] == "cancelled"
+                    else "deletion_reason"
+                ),
+            )
+            if require_approvals and not self._approvals_complete(
+                connection, before["id"]
+            ):
+                raise ApprovalRequired
             after = connection.execute(
                 """
                 UPDATE public.voc_requests

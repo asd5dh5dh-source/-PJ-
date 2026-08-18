@@ -70,8 +70,10 @@ def test_customer_reply_requires_active_task_and_final_approvals():
         def get_case(self, case_id):
             return {"case_id": case_id, "rounds": [{"id": 9, "stage": "final_review"}]}
 
-        def approvals_complete(self, request_id):
-            return False
+        def change_stage(self, case_id, values, writer_name, require_approvals=False):
+            from app.repositories.collaboration import ApprovalRequired
+
+            raise ApprovalRequired
 
     with pytest.raises(HTTPException) as error:
         WorkflowService(Repository()).change_stage(
@@ -97,8 +99,12 @@ def test_task_update_and_audit_share_one_repository_transaction():
 
         def execute(self, query, params=()):
             self.calls.append((query, params))
-            if "FOR UPDATE" in query:
-                return Result({"id": 5, "status": "in_progress", "response_content": None})
+            if "SELECT voc_request_id" in query:
+                return Result({"voc_request_id": 3})
+            if "FROM public.voc_requests" in query and "FOR UPDATE" in query:
+                return Result({"id": 3})
+            if "FROM public.department_tasks" in query and "FOR UPDATE" in query:
+                return Result({"id": 5, "voc_request_id": 3, "status": "in_progress", "response_content": None})
             if "UPDATE public.department_tasks" in query:
                 return Result({"id": 5, "status": "completed", "response_content": "Done"})
             return Result(None)
@@ -157,3 +163,377 @@ def test_voc_detail_includes_task_review_audits():
     detail = CollaborationRepository(connection_factory).get_case("VOC-2026-0001")
 
     assert detail["audits"] == [{"entity_type": "task_review", "entity_id": "8"}]
+
+
+def test_task_edit_invalidates_older_manager_approval():
+    from app.repositories.collaboration import CollaborationRepository
+
+    class Result:
+        def __init__(self, row):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    class Connection:
+        def execute(self, query, params=()):
+            normalized = " ".join(query.split()).lower()
+            invalidates_old_review = (
+                "select distinct on (task_id) task_id, decision, reviewed_at" in normalized
+                and "with all_tasks as" in normalized
+                and "select max(updated_at) from all_tasks" in normalized
+                and "updated_at" in normalized
+                and ("< task.updated_at" in normalized or ">= task.updated_at" in normalized)
+            )
+            return Result({"approved": not invalidates_old_review})
+
+    @contextmanager
+    def connection_factory():
+        yield Connection()
+
+    assert CollaborationRepository(connection_factory).approvals_complete(1) is False
+
+
+def test_customer_reply_approval_check_and_stage_change_share_locked_transaction():
+    from app.repositories.collaboration import ApprovalRequired, CollaborationRepository
+
+    class Result:
+        def __init__(self, row=None):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    class Connection:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, query, params=()):
+            self.calls.append((query, params))
+            if "FROM public.voc_requests" in query:
+                return Result({"id": 3, "case_id": "VOC-2026-0001", "stage": "final_review"})
+            if "AS approved" in query:
+                return Result({"approved": False})
+            raise AssertionError(query)
+
+    connection = Connection()
+    entries = 0
+
+    @contextmanager
+    def connection_factory():
+        nonlocal entries
+        entries += 1
+        yield connection
+
+    with pytest.raises(ApprovalRequired):
+        CollaborationRepository(connection_factory).change_stage(
+            "VOC-2026-0001",
+            {"stage": "customer_reply"},
+            "Kim",
+            require_approvals=True,
+        )
+
+    assert entries == 1
+    assert any(
+        "FROM public.voc_requests" in query and "FOR UPDATE" in query
+        for query, _ in connection.calls
+    )
+    assert not any("UPDATE public.voc_requests" in query for query, _ in connection.calls)
+
+
+@pytest.mark.parametrize("terminal_stage", ["cancelled", "deleted"])
+def test_terminal_stage_cannot_be_reversed(terminal_stage):
+    from app.services.workflow import WorkflowService
+
+    class Repository:
+        def get_case(self, case_id):
+            return {"case_id": case_id, "rounds": [{"id": 1, "stage": terminal_stage}]}
+
+        def change_stage(self, case_id, values, writer_name, require_approvals=False):
+            raise AssertionError("terminal transition must not reach repository")
+
+    with pytest.raises(HTTPException) as error:
+        WorkflowService(Repository()).change_stage(
+            "VOC-2026-0001", {"stage": "received", "reason": "restore"}, "Kim"
+        )
+
+    assert error.value.status_code == 409
+
+
+def test_forward_stage_jump_is_rejected():
+    from app.services.workflow import WorkflowService
+
+    class Repository:
+        def get_case(self, case_id):
+            return {"case_id": case_id, "rounds": [{"id": 1, "stage": "received"}]}
+
+        def change_stage(self, case_id, values, writer_name, require_approvals=False):
+            raise AssertionError("invalid jump must not reach repository")
+
+    with pytest.raises(HTTPException) as error:
+        WorkflowService(Repository()).change_stage(
+            "VOC-2026-0001", {"stage": "department_work"}, "Kim"
+        )
+
+    assert error.value.status_code == 409
+
+
+def test_department_manager_review_requires_matching_task_manager():
+    from app.services.workflow import WorkflowService
+
+    class Repository:
+        def get_task(self, task_id):
+            return {"id": task_id, "manager_name": "Lee", "status": "completed"}
+
+        def review_task(self, task_id, values, writer_name):
+            raise AssertionError("wrong manager must not reach repository")
+
+    with pytest.raises(HTTPException) as error:
+        WorkflowService(Repository()).review_task(
+            4,
+            {"reviewer_role": "department_manager", "decision": "approved"},
+            "Kim",
+        )
+
+    assert error.value.status_code == 403
+
+
+def test_overdue_task_is_first_marked_delayed_then_can_complete():
+    from app.services.workflow import WorkflowService
+
+    class Repository:
+        def __init__(self):
+            self.task = {
+                "id": 7,
+                "due_date": date(2026, 8, 17),
+                "status": "in_progress",
+                "response_content": "Root cause confirmed",
+                "delay_reason": None,
+            }
+
+        def get_task(self, task_id):
+            return dict(self.task)
+
+        def update_task(self, task_id, changes, writer_name):
+            self.task.update(changes)
+            return dict(self.task)
+
+    repository = Repository()
+    service = WorkflowService(repository, today=lambda: date(2026, 8, 18))
+
+    delayed = service.update_task(
+        7,
+        {"status": "completed", "delay_reason": "Supplier evidence arrived late"},
+        "Kim",
+    )
+    completed = service.update_task(7, {"status": "completed"}, "Kim")
+
+    assert delayed["status"] == "delayed"
+    assert completed["status"] == "completed"
+
+
+def test_omitted_follow_up_sender_fields_preserve_prior_identity():
+    from app.services.workflow import WorkflowService
+
+    class Repository:
+        def __init__(self):
+            self.values = None
+
+        def get_case(self, case_id):
+            return {"case_id": case_id, "rounds": [{"id": 1, "stage": "customer_reply"}]}
+
+        def create_round(self, case_id, values, writer_name):
+            self.values = values
+            return {"case_id": case_id, "round_number": 2}
+
+    repository = Repository()
+    WorkflowService(repository).create_round(
+        "VOC-2026-0001", {"customer_request": "Follow-up"}, "Kim"
+    )
+
+    assert "sender_name" not in repository.values
+    assert "sender_email" not in repository.values
+    assert "sender_company" not in repository.values
+
+
+@pytest.mark.parametrize("stage", ["received", "in_progress", "cancelled", "deleted"])
+def test_follow_up_round_requires_replied_or_completed_case(stage):
+    from app.services.workflow import WorkflowService
+
+    class Repository:
+        def get_case(self, case_id):
+            return {"case_id": case_id, "rounds": [{"id": 1, "stage": stage}]}
+
+        def create_round(self, case_id, values, writer_name):
+            raise AssertionError("invalid follow-up must not reach repository")
+
+    with pytest.raises(HTTPException) as error:
+        WorkflowService(Repository()).create_round(
+            "VOC-2026-0001", {"customer_request": "Follow-up"}, "Kim"
+        )
+
+    assert error.value.status_code == 409
+
+
+def test_no_op_task_update_is_rejected():
+    from app.services.workflow import WorkflowService
+
+    class Repository:
+        def get_task(self, task_id):
+            return {"id": task_id, "status": "in_progress", "due_date": date(2026, 8, 20)}
+
+        def update_task(self, task_id, changes, writer_name):
+            raise AssertionError("no-op must not reach repository")
+
+    with pytest.raises(HTTPException) as error:
+        WorkflowService(Repository(), today=lambda: date(2026, 8, 18)).update_task(
+            7, {"status": "in_progress"}, "Kim"
+        )
+
+    assert error.value.status_code == 422
+
+
+def test_stage_transition_is_revalidated_under_repository_lock():
+    from app.repositories.collaboration import (
+        CollaborationRepository,
+        StageTransitionNotAllowed,
+    )
+
+    class Result:
+        def __init__(self, row):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    class Connection:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, query, params=()):
+            self.calls.append((query, params))
+            if "FROM public.voc_requests" in query:
+                return Result({"id": 1, "stage": "received"})
+            raise AssertionError("invalid transition must not update")
+
+    connection = Connection()
+
+    @contextmanager
+    def connection_factory():
+        yield connection
+
+    with pytest.raises(StageTransitionNotAllowed):
+        CollaborationRepository(connection_factory).change_stage(
+            "VOC-2026-0001", {"stage": "department_work"}, "Kim"
+        )
+
+    assert "FOR UPDATE" in connection.calls[0][0]
+
+
+def test_manager_identity_is_revalidated_under_review_transaction_lock():
+    from app.repositories.collaboration import CollaborationRepository, ReviewerMismatch
+
+    class Result:
+        def __init__(self, row):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    class Connection:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, query, params=()):
+            self.calls.append((query, params))
+            if "FROM public.department_tasks" in query:
+                return Result({"id": 4, "voc_request_id": 1, "manager_name": "Lee"})
+            if "FROM public.voc_requests" in query and "FOR UPDATE" in query:
+                return Result({"id": 1})
+            raise AssertionError("wrong manager must not insert review")
+
+    connection = Connection()
+
+    @contextmanager
+    def connection_factory():
+        yield connection
+
+    with pytest.raises(ReviewerMismatch):
+        CollaborationRepository(connection_factory).review_task(
+            4,
+            {"reviewer_role": "department_manager", "decision": "approved"},
+            "Kim",
+        )
+
+    assert any(
+        "FROM public.voc_requests" in query and "FOR UPDATE" in query
+        for query, _ in connection.calls
+    )
+
+
+@pytest.mark.parametrize("target", ["cancelled", "deleted"])
+def test_terminal_transition_requires_specific_reason_at_service_boundary(target):
+    from app.services.workflow import WorkflowService
+
+    class Repository:
+        def get_case(self, case_id):
+            return {"case_id": case_id, "rounds": [{"id": 1, "stage": "received"}]}
+
+        def change_stage(self, case_id, values, writer_name, require_approvals=False):
+            raise AssertionError("missing terminal reason must not reach repository")
+
+    with pytest.raises(HTTPException) as error:
+        WorkflowService(Repository()).change_stage(
+            "VOC-2026-0001", {"stage": target}, "Kim"
+        )
+
+    assert error.value.status_code == 422
+
+
+def test_task_update_locks_parent_round_before_task_mutation():
+    from app.repositories.collaboration import CollaborationRepository
+
+    class Result:
+        def __init__(self, row=None):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    class Connection:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, query, params=()):
+            self.calls.append((" ".join(query.split()), params))
+            if "SELECT voc_request_id FROM public.department_tasks" in query:
+                return Result({"voc_request_id": 3})
+            if "FROM public.voc_requests" in query and "FOR UPDATE" in query:
+                return Result({"id": 3})
+            if "FROM public.department_tasks" in query and "FOR UPDATE" in query:
+                return Result({"id": 5, "voc_request_id": 3, "status": "in_progress"})
+            if "UPDATE public.department_tasks" in query:
+                return Result({"id": 5, "voc_request_id": 3, "status": "completed"})
+            return Result()
+
+    connection = Connection()
+
+    @contextmanager
+    def connection_factory():
+        yield connection
+
+    CollaborationRepository(connection_factory).update_task(
+        5, {"status": "completed"}, "Kim"
+    )
+
+    round_lock = next(
+        index
+        for index, (query, _) in enumerate(connection.calls)
+        if "FROM public.voc_requests" in query and "FOR UPDATE" in query
+    )
+    task_lock = next(
+        index
+        for index, (query, _) in enumerate(connection.calls)
+        if "FROM public.department_tasks" in query and "FOR UPDATE" in query
+    )
+    assert round_lock < task_lock

@@ -4,20 +4,14 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from app.repositories.collaboration import (
+    ApprovalRequired,
+    ReviewerMismatch,
+    RoundNotAllowed,
+    StageTransitionNotAllowed,
+    validate_stage_transition,
+)
 from app.services.mail_parser import parse_sender
-
-
-STAGES = [
-    "received",
-    "managing",
-    "in_progress",
-    "department_work",
-    "department_review",
-    "manager_review",
-    "final_review",
-    "customer_reply",
-    "completed",
-]
 
 
 class WorkflowService:
@@ -40,9 +34,20 @@ class WorkflowService:
     def create_round(
         self, case_id: str, values: dict[str, Any], writer_name: str
     ):
+        case = self.repository.get_case(case_id)
+        if case is None:
+            raise HTTPException(status_code=404, detail="VOC not found")
+        if case["rounds"][-1]["stage"] not in {"customer_reply", "completed"}:
+            raise HTTPException(
+                status_code=409,
+                detail="Follow-up rounds require customer_reply or completed stage",
+            )
         values = dict(values)
         self._apply_sender(values)
-        created = self.repository.create_round(case_id, values, writer_name)
+        try:
+            created = self.repository.create_round(case_id, values, writer_name)
+        except RoundNotAllowed as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         if created is None:
             raise HTTPException(status_code=404, detail="VOC not found")
         return created
@@ -54,10 +59,29 @@ class WorkflowService:
         if task is None:
             raise HTTPException(status_code=404, detail="Task not found")
         changes = dict(changes)
+        changes = {
+            field: value
+            for field, value in changes.items()
+            if value != task.get(field)
+        }
+        if not changes:
+            raise HTTPException(status_code=422, detail="Task update has no changes")
         status = changes.get("status", task["status"])
         due_date = changes.get("due_date", task.get("due_date"))
         response = changes.get("response_content", task.get("response_content"))
         delay_reason = changes.get("delay_reason", task.get("delay_reason"))
+        if (
+            task["status"] not in {"completed", "excluded", "delayed"}
+            and due_date
+            and due_date < self.today()
+        ):
+            if not delay_reason:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Overdue tasks require delay_reason before completion",
+                )
+            changes["status"] = "delayed"
+            status = "delayed"
         if status == "completed":
             if not due_date or not response:
                 raise HTTPException(
@@ -78,15 +102,28 @@ class WorkflowService:
     def review_task(
         self, task_id: int, values: dict[str, Any], writer_name: str
     ):
-        if self.repository.get_task(task_id) is None:
+        task = self.repository.get_task(task_id)
+        if task is None:
             raise HTTPException(status_code=404, detail="Task not found")
+        if (
+            values["reviewer_role"] == "department_manager"
+            and task.get("manager_name") != writer_name
+        ):
+            raise HTTPException(
+                status_code=403, detail="Task department manager required"
+            )
         if (
             values["reviewer_role"] == "final_approver"
             and hasattr(self.repository, "is_final_approver")
             and not self.repository.is_final_approver(writer_name)
         ):
             raise HTTPException(status_code=403, detail="Fixed final approver required")
-        return self.repository.review_task(task_id, values, writer_name)
+        try:
+            return self.repository.review_task(task_id, values, writer_name)
+        except ReviewerMismatch as error:
+            raise HTTPException(
+                status_code=403, detail="Task department manager required"
+            ) from error
 
     def change_stage(
         self, case_id: str, values: dict[str, Any], writer_name: str
@@ -97,27 +134,41 @@ class WorkflowService:
         latest = case["rounds"][-1]
         target = values["stage"]
         current = latest["stage"]
-        if target == "customer_reply" and not self.repository.approvals_complete(
-            latest["id"]
-        ):
+        try:
+            validate_stage_transition(
+                current,
+                target,
+                values.get("reason"),
+                values.get(
+                    "cancellation_reason"
+                    if target == "cancelled"
+                    else "deletion_reason"
+                ),
+            )
+        except StageTransitionNotAllowed as error:
+            raise HTTPException(
+                status_code=error.status_code, detail=error.detail
+            ) from error
+        try:
+            return self.repository.change_stage(
+                case_id,
+                values,
+                writer_name,
+                require_approvals=target == "customer_reply",
+            )
+        except ApprovalRequired as error:
             raise HTTPException(
                 status_code=409,
                 detail="All active tasks, manager reviews, and final approval are required",
-            )
-        if (
-            target in STAGES
-            and current in STAGES
-            and STAGES.index(target) < STAGES.index(current)
-            and not values.get("reason")
-        ):
+            ) from error
+        except StageTransitionNotAllowed as error:
             raise HTTPException(
-                status_code=422, detail="Reverse stage transitions require reason"
-            )
-        return self.repository.change_stage(case_id, values, writer_name)
+                status_code=error.status_code, detail=error.detail
+            ) from error
 
     @staticmethod
     def _apply_sender(values: dict[str, Any]) -> None:
         parsed = parse_sender(values.get("original_mail_body", ""))
         for field, parsed_value in parsed.items():
-            if not values.get(field):
+            if parsed_value is not None and not values.get(field):
                 values[field] = parsed_value
