@@ -143,3 +143,54 @@ def test_xlsx_export_removes_xml_invalid_control_characters(client, monkeypatch)
 
     fromstring(sheet)
     assert b"\x00" not in sheet
+
+
+def test_csv_export_uses_archive_keyword_ranking_and_requested_sort():
+    cases = [
+        {
+            **CASES[0],
+            "case_id": "OLD-NO-MATCH",
+            "customer_request": "Voltage review",
+            "original_mail_body": "Please review voltage.",
+            "full_response_history": "Voltage was reviewed.",
+            "received_at": date(2026, 1, 1),
+        },
+        {
+            **CASES[0],
+            "case_id": "NEW-GAS",
+            "customer_request": "Gas generation during storage",
+            "original_mail_body": "Please investigate gas generation.",
+            "full_response_history": "Gas containment was shared.",
+            "received_at": date(2026, 2, 1),
+        },
+    ]
+
+    class SemanticRepository(ExportRepository):
+        def list_candidates(self, filters=None, **filter_values):
+            return cases
+
+    app = create_app(
+        SemanticRepository(), collaboration_repository=OperationsRepository()
+    )
+    app.state.writer_attempt_store = AlwaysUnlockedWriterAttemptStore()
+    semantic_client = TestClient(app)
+
+    ranked = semantic_client.get(
+        "/api/export/archive.csv",
+        headers=WRITER_HEADERS,
+        params={"q": "gas generation", "sort": "relevance"},
+    )
+    oldest = semantic_client.get(
+        "/api/export/archive.csv",
+        headers=WRITER_HEADERS,
+        params={"sort": "oldest"},
+    )
+
+    assert [row["case_id"] for row in csv.DictReader(StringIO(ranked.content.decode("utf-8-sig")))] == [
+        "NEW-GAS",
+        "OLD-NO-MATCH",
+    ]
+    assert [row["case_id"] for row in csv.DictReader(StringIO(oldest.content.decode("utf-8-sig")))] == [
+        "OLD-NO-MATCH",
+        "NEW-GAS",
+    ]

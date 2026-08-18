@@ -36,7 +36,7 @@ def create_app(
     app = FastAPI(title="Local VOC Archive")
     app.include_router(writer_router)
     app.include_router(create_archive_router(repository, search_service))
-    app.include_router(create_export_router(repository))
+    app.include_router(create_export_router(search_service))
     app.include_router(create_requests_router(repository, search_service, receipt_date))
     app.include_router(
         create_collaboration_router(

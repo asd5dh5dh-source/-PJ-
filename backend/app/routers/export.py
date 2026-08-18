@@ -27,11 +27,19 @@ EXPORT_COLUMNS = (
 XML_INVALID_CONTROLS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 
-def _archive_rows(repository: Any, query: ArchiveQuery) -> list[dict[str, Any]]:
-    filters = query.model_dump(
-        exclude={"q", "sort", "page", "page_size"}, exclude_none=True
-    )
-    rows = repository.list_candidates(filters=filters)
+def _archive_rows(search_service: Any, query: ArchiveQuery) -> list[dict[str, Any]]:
+    effective_sort = query.sort or ("relevance" if query.q else "latest")
+    rows = []
+    page = 1
+    while True:
+        result = search_service.search_archive(
+            query.model_copy(update={"page": page, "page_size": 100}),
+            effective_sort,
+        )
+        rows.extend(result["items"])
+        if len(rows) >= result["total"]:
+            break
+        page += 1
     return [{column: row.get(column) for column in EXPORT_COLUMNS} for row in rows]
 
 
@@ -111,7 +119,7 @@ def _xlsx(rows: list[dict[str, Any]]) -> bytes:
     return output.getvalue()
 
 
-def create_export_router(repository: Any) -> APIRouter:
+def create_export_router(search_service: Any) -> APIRouter:
     router = APIRouter(prefix="/api/export", tags=["export"])
 
     @router.get("/archive.csv")
@@ -122,7 +130,7 @@ def create_export_router(repository: Any) -> APIRouter:
         stream = StringIO(newline="")
         csv_writer = csv.DictWriter(stream, fieldnames=EXPORT_COLUMNS)
         csv_writer.writeheader()
-        csv_writer.writerows(_csv_rows(_archive_rows(repository, query)))
+        csv_writer.writerows(_csv_rows(_archive_rows(search_service, query)))
         return Response(
             content=stream.getvalue().encode("utf-8-sig"),
             media_type="text/csv",
@@ -135,7 +143,7 @@ def create_export_router(repository: Any) -> APIRouter:
         writer: Annotated[WriterContext, Depends(require_writer)],
     ):
         return Response(
-            content=_xlsx(_archive_rows(repository, query)),
+            content=_xlsx(_archive_rows(search_service, query)),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": 'attachment; filename="voc-archive.xlsx"'},
         )

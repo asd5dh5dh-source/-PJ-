@@ -53,3 +53,18 @@ test("training archive can be searched without creating records", async ({ page 
   await expect(page.getByText("관련도순", { exact: true }).last()).toBeVisible();
   expect(writeRequests).toEqual([]);
 });
+
+test("mobile navigation stays within the viewport and scrolls horizontally", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.route("**/api/dashboard**", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ stage_counts: [], due_tasks: [], recent_requests: [] }),
+  }));
+
+  await page.goto("/");
+
+  const navigation = page.getByRole("navigation", { name: "업무 메뉴" });
+  await expect(navigation).toBeVisible();
+  expect(await navigation.evaluate((element) => getComputedStyle(element).overflowX)).toBe("auto");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});

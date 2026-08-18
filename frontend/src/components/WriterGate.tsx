@@ -13,7 +13,7 @@ export type RequestWriter = (
 export default function WriterGate({
   children,
 }: {
-  children: (requestWriter: RequestWriter) => ReactNode;
+  children: (requestWriter: RequestWriter, writer?: WriterCredentials) => ReactNode;
 }) {
   const [writer, setWriter] = useState<WriterCredentials>();
   const [open, setOpen] = useState(false);
@@ -116,7 +116,7 @@ export default function WriterGate({
           </button>
         </div>
       )}
-      {children(requestWriter)}
+      {children(requestWriter, writer)}
       {open && (
         <div className="dialog-backdrop">
           <section ref={dialog} className="writer-dialog" role="dialog" aria-modal="true" aria-labelledby="writer-gate-title" aria-describedby="writer-gate-description">
