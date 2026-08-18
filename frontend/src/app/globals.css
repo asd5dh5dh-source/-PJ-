@@ -1,17 +1,19 @@
 :root { color-scheme: light; font-family: Arial, "Noto Sans KR", sans-serif; color: #182230; background: #f9f9ff; }
 * { box-sizing: border-box; }
 body { margin: 0; background: #f9f9ff; }
-button, input, select { font: inherit; }
+button, input, select, textarea { font: inherit; }
 button, a, summary, select { -webkit-tap-highlight-color: transparent; }
 a { color: inherit; }
-button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 3px solid #80bdf1; outline-offset: 2px; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 3px solid #80bdf1; outline-offset: 2px; }
 .skip-link { position: fixed; z-index: 10; top: 8px; left: 8px; padding: 8px 12px; transform: translateY(-150%); background: white; border: 1px solid #005eb8; border-radius: 6px; }
 .skip-link:focus { transform: translateY(0); }
 .app-shell { min-height: 100vh; }
 .sidebar { position: fixed; inset: 0 auto 0 0; width: 260px; padding: 28px 20px; display: flex; flex-direction: column; color: #233044; background: #fff; border-right: 1px solid #dfe3eb; }
 .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 40px; text-decoration: none; font-size: 18px; }
 .brand span { display: grid; place-items: center; width: 36px; height: 36px; color: white; background: #005eb8; border-radius: 8px; font-size: 13px; letter-spacing: .05em; }
-.sidebar nav a { display: block; padding: 12px 14px; color: #005eb8; background: #eef6ff; border-left: 3px solid #005eb8; border-radius: 6px; text-decoration: none; font-weight: 700; }
+.sidebar nav { display: grid; gap: 6px; }
+.sidebar nav a { display: block; padding: 12px 14px; color: #344054; border-left: 3px solid transparent; border-radius: 6px; text-decoration: none; }
+.sidebar nav a[aria-current="page"] { color: #005eb8; background: #eef6ff; border-left-color: #005eb8; font-weight: 700; }
 .sidebar-note { margin-top: auto; color: #667085; font-size: 12px; }
 .app-content { margin-left: 260px; min-width: 0; }
 .topbar { height: 64px; padding: 0 32px; display: flex; align-items: center; justify-content: space-between; color: #475467; background: #fff; border-bottom: 1px solid #dfe3eb; font-size: 13px; }
@@ -26,7 +28,8 @@ main { padding: 30px 32px 48px; }
 .search-row { display: flex; align-items: end; gap: 10px; }
 label span, .search-field span { display: block; margin-bottom: 6px; color: #344054; font-size: 12px; font-weight: 700; }
 .search-field { flex: 1; }
-input, select { width: 100%; min-height: 40px; padding: 9px 11px; color: #182230; background: #fff; border: 1px solid #b7c0ce; border-radius: 6px; }
+input, select, textarea { width: 100%; min-height: 40px; padding: 9px 11px; color: #182230; background: #fff; border: 1px solid #b7c0ce; border-radius: 6px; }
+textarea { resize: vertical; }
 input::placeholder { color: #7b8493; }
 .primary-button, .secondary-button, .pagination button, .primary-link { min-height: 40px; padding: 9px 16px; border-radius: 6px; font-weight: 700; cursor: pointer; }
 .primary-button, .primary-link { color: white; background: #005eb8; border: 1px solid #005eb8; }
@@ -79,7 +82,7 @@ td small { display: block; margin-top: 3px; color: #667085; }
 @media (max-width: 820px) {
   .sidebar { position: static; width: 100%; height: auto; padding: 12px 18px; flex-direction: row; align-items: center; gap: 18px; border-right: 0; border-bottom: 1px solid #dfe3eb; }
   .brand { margin: 0; } .brand span { width: 32px; height: 32px; } .brand strong, .sidebar-note { display: none; }
-  .sidebar nav { flex: 1; } .sidebar nav a { width: max-content; padding: 8px 10px; border-left: 0; border-bottom: 2px solid #005eb8; }
+  .sidebar nav { flex: 1; display: flex; } .sidebar nav a { width: max-content; padding: 8px 10px; border-left: 0; } .sidebar nav a[aria-current="page"] { border-bottom: 2px solid #005eb8; }
   .app-content { margin-left: 0; } .topbar { height: 48px; padding: 0 18px; } main { padding: 22px 18px 36px; }
   .archive-layout.has-preview { grid-template-columns: 1fr; } .preview-panel { position: static; max-height: none; }
 }
