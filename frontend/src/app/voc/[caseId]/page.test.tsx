@@ -208,7 +208,7 @@ describe("VOC detail page", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Writer-Name": "Final Kim",
+        "X-Writer-Name": "Final%20Kim",
         "X-Writer-Password": "correct-password",
       },
       body: JSON.stringify({ reviewer_role: "final_approver", decision: "rejected" }),

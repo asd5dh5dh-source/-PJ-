@@ -32,7 +32,7 @@ test("writer can save a draft and inspect notification preview", async ({ page }
     const url = new URL(request.url());
 
     if (request.method() === "POST" && url.pathname === "/api/writer/verify") {
-      await route.fulfill({ json: { writer_name: "QA Writer" } });
+      await route.fulfill({ json: { writer_name: "검증자" } });
       return;
     }
     if (request.method() === "POST" && url.pathname === "/api/voc") {
@@ -65,13 +65,13 @@ test("writer can save a draft and inspect notification preview", async ({ page }
   await page.locator('form button[type="submit"]').click();
 
   const writerDialog = page.getByRole("dialog");
-  await writerDialog.locator('input[name="writer_name"]').fill("QA Writer");
+  await writerDialog.locator('input[name="writer_name"]').fill("검증자");
   await writerDialog.locator('input[name="password"]').fill("test-password");
   await writerDialog.locator('button[type="submit"]').click();
 
   await expect(page.getByRole("heading", { name: /VOC-2026-0001/ })).toBeVisible();
   expect(protectedWrites).toHaveLength(1);
-  expect(protectedWrites[0].headers["x-writer-name"]).toBe("QA Writer");
+  expect(protectedWrites[0].headers["x-writer-name"]).toBe("%EA%B2%80%EC%A6%9D%EC%9E%90");
   expect(protectedWrites[0].headers["x-writer-password"]).toBe("test-password");
 
   await page.goto("/notifications");

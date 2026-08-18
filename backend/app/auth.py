@@ -1,6 +1,8 @@
 from hashlib import sha256
 import hmac
+import re
 from typing import Annotated
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import (
@@ -41,6 +43,12 @@ def _attempt_store(request: Request) -> WriterAttemptStore:
 
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
+
+
+def _decode_writer_name(value: str) -> str:
+    if re.search(r"%(?![0-9a-fA-F]{2})", value):
+        raise ValueError("Malformed percent-encoded writer name")
+    return unquote(value, encoding="utf-8", errors="strict")
 
 
 def _verify_credentials(
@@ -93,8 +101,10 @@ def require_writer(
             detail="Writer headers are required",
         )
     try:
-        credentials = WriterCredentials(writer_name=writer_name, password=password)
-    except ValidationError as error:
+        credentials = WriterCredentials(
+            writer_name=_decode_writer_name(writer_name), password=password
+        )
+    except (ValidationError, ValueError) as error:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid writer credentials",

@@ -37,7 +37,7 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
 
 function writerHeaders(writer: WriterCredentials) {
   return {
-    "X-Writer-Name": writer.writer_name,
+    "X-Writer-Name": encodeURIComponent(writer.writer_name),
     "X-Writer-Password": writer.password,
   };
 }

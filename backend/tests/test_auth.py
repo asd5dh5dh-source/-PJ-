@@ -111,6 +111,34 @@ def test_writer_dependency_accepts_protected_request_headers(protected_client):
     assert response.json() == {"writer_name": "Kim"}
 
 
+def test_writer_dependency_restores_percent_encoded_unicode_name(protected_client):
+    response = protected_client.get(
+        "/protected",
+        headers={
+            "X-Writer-Name": "%EA%B2%80%EC%A6%9D%EC%9E%90",
+            "X-Writer-Password": "correct-password",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"writer_name": "검증자"}
+
+
+@pytest.mark.parametrize("writer_name", ["Kim%ZZ", "%FF"])
+def test_writer_dependency_rejects_malformed_percent_encoded_name(
+    protected_client, writer_name
+):
+    response = protected_client.get(
+        "/protected",
+        headers={
+            "X-Writer-Name": writer_name,
+            "X-Writer-Password": "correct-password",
+        },
+    )
+
+    assert response.status_code == 401
+
+
 def test_writer_dependency_rejects_missing_headers(protected_client):
     assert protected_client.get("/protected").status_code == 401
 
