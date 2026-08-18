@@ -48,6 +48,52 @@ export type WriterCredentials = {
   password: string;
 };
 
+export type DashboardPeriod = "30d" | "week" | "month";
+
+export type DashboardData = {
+  stage_counts: Array<{ stage: VocStage; count: number }>;
+  due_tasks: Array<{
+    id: number;
+    case_id?: string | null;
+    department?: string | null;
+    status: TaskStatus;
+    due_date?: string | null;
+    priority?: "normal" | "high" | null;
+    stage?: VocStage | null;
+  }>;
+  recent_requests: Array<{
+    case_id: string;
+    sender_company?: string | null;
+    product_equipment?: string | null;
+    priority?: "normal" | "high" | null;
+    stage?: VocStage | null;
+    created_at?: string | null;
+  }>;
+};
+
+export type NotificationLog = {
+  id: number;
+  subject: string;
+  body: string;
+  scheduled_at?: string | null;
+  sent_at?: string | null;
+  runtime_profile: "external_review" | "internal";
+  delivery_status: "preview" | "pending" | "sent" | "failed";
+  real_delivery: boolean;
+  created_at: string;
+};
+
+export type MasterResource =
+  | "customers"
+  | "products"
+  | "voc_types"
+  | "people"
+  | "final_approver"
+  | "templates"
+  | "notification_settings";
+
+export type MasterRecord = Record<string, unknown> & { id?: number; singleton_id?: number };
+
 export type TaskStatus =
   | "not_started"
   | "reviewing"

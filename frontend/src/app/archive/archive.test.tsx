@@ -157,4 +157,39 @@ describe("ArchivePage", () => {
     expect(within(alert).getByRole("button", { name: "다시 시도" })).toBeInTheDocument();
     expect(screen.queryByText("COM-001")).not.toBeInTheDocument();
   });
+
+  it("writer-gates archive exports and preserves the active filters", async () => {
+    const user = userEvent.setup();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: vi.fn(() => "blob:archive"),
+      revokeObjectURL: vi.fn(),
+    });
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/api/writer/verify")) {
+        return new Response(JSON.stringify({ writer_name: "Kim" }), { status: 200 });
+      }
+      if (url.includes("/api/export/archive.csv")) return new Response("case_id\nCOM-001", { status: 200 });
+      const data = url.includes("/COM-001")
+        ? archiveDetail
+        : { ...archivePage, sort: url.includes("q=") ? "relevance" : "latest" };
+      return new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    render(<ArchivePage />);
+    await user.type(screen.getByRole("searchbox"), "gas generation");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    await user.click(screen.getByRole("button", { name: "CSV 다운로드" }));
+    await user.type(screen.getByLabelText("작성자명"), "Kim");
+    await user.type(screen.getByLabelText("공용 비밀번호"), "correct-password");
+    await user.click(screen.getByRole("button", { name: "인증 후 계속" }));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      "/api/export/archive.csv?q=gas+generation&sort=relevance",
+      { headers: { "X-Writer-Name": "Kim", "X-Writer-Password": "correct-password" } },
+    ));
+    expect(click).toHaveBeenCalled();
+  });
 });

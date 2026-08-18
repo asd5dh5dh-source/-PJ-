@@ -3,7 +3,12 @@ import type {
   ArchiveItem,
   ArchivePageData,
   ArchiveQuery,
+  DashboardData,
+  DashboardPeriod,
   DepartmentTask,
+  MasterRecord,
+  MasterResource,
+  NotificationLog,
   TaskReview,
   VocCreateInput,
   VocDetail,
@@ -30,15 +35,19 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function writerHeaders(writer: WriterCredentials) {
+  return {
+    "X-Writer-Name": writer.writer_name,
+    "X-Writer-Password": writer.password,
+  };
+}
+
 async function postJson<T>(path: string, payload: unknown, writer?: WriterCredentials): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(writer ? {
-        "X-Writer-Name": writer.writer_name,
-        "X-Writer-Password": writer.password,
-      } : {}),
+      ...(writer ? writerHeaders(writer) : {}),
     },
     body: JSON.stringify(payload),
   });
@@ -53,6 +62,50 @@ export function getArchive(query: ArchiveQuery, signal?: AbortSignal) {
 
 export function getArchiveDetail(caseId: string, signal?: AbortSignal) {
   return getJson<ArchiveDetail>(`/api/archive/${encodeURIComponent(caseId)}`, signal);
+}
+
+export function getDashboard(
+  query: { period?: DashboardPeriod; date_from?: string; date_to?: string },
+  signal?: AbortSignal,
+) {
+  const search = new URLSearchParams(
+    Object.entries(query).filter((entry): entry is [string, string] => Boolean(entry[1])),
+  ).toString();
+  return getJson<DashboardData>(`/api/dashboard?${search}`, signal);
+}
+
+export function getNotifications(signal?: AbortSignal) {
+  return getJson<NotificationLog[]>("/api/notifications", signal);
+}
+
+export async function downloadArchive(
+  format: "csv" | "xlsx",
+  query: ArchiveQuery,
+  writer: WriterCredentials,
+) {
+  const search = queryString(query);
+  const response = await fetch(
+    `${API_BASE_URL}/api/export/archive.${format}${search ? `?${search}` : ""}`,
+    { headers: writerHeaders(writer) },
+  );
+  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  return response.blob();
+}
+
+export async function getMasterData(resource: MasterResource, writer: WriterCredentials) {
+  const response = await fetch(`${API_BASE_URL}/api/admin/master-data/${resource}`, {
+    headers: writerHeaders(writer),
+  });
+  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  return response.json() as Promise<MasterRecord[]>;
+}
+
+export function createMasterData(
+  resource: MasterResource,
+  payload: Record<string, unknown>,
+  writer: WriterCredentials,
+) {
+  return postJson<MasterRecord>(`/api/admin/master-data/${resource}`, payload, writer);
 }
 
 export type ManualRequestInput = {

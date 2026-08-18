@@ -6,7 +6,9 @@ import AppShell from "@/components/AppShell";
 import ArchiveFilters from "@/components/ArchiveFilters";
 import ArchivePreview from "@/components/ArchivePreview";
 import ArchiveResults from "@/components/ArchiveResults";
-import { getArchive, getArchiveDetail } from "@/lib/api";
+import WriterGate from "@/components/WriterGate";
+import type { RequestWriter } from "@/components/WriterGate";
+import { downloadArchive, getArchive, getArchiveDetail } from "@/lib/api";
 import type { ArchiveDetail, ArchivePageData, ArchiveQuery, ArchiveSort } from "@/lib/types";
 
 const queryKeys = ["q", "customer_name", "product_equipment", "voc_type", "voc_subtype", "final_status", "responsible_department", "received_from", "received_to"] as const;
@@ -42,6 +44,7 @@ export default function ArchivePage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState(false);
   const [detailError, setDetailError] = useState(false);
+  const [exportError, setExportError] = useState(false);
   const [retry, setRetry] = useState(0);
   const [detailRetry, setDetailRetry] = useState(0);
 
@@ -96,9 +99,36 @@ export default function ArchivePage() {
 
   const returnTo = `/archive${listKey ? `?${listKey}` : ""}`;
 
+  function exportArchive(format: "csv" | "xlsx", requestWriter: RequestWriter) {
+    requestWriter(async (writer) => {
+      setExportError(false);
+      try {
+        const blob = await downloadArchive(format, query, writer);
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `voc-archive.${format}`;
+        link.click();
+        URL.revokeObjectURL(url);
+      } catch {
+        setExportError(true);
+      }
+    });
+  }
+
   return (
-    <AppShell>
+    <AppShell activeSection="archive">
       <div className="page-header"><p>VOC ARCHIVE</p><h1>고객 VOC 아카이브</h1><span>과거 사례를 검색하고 원문과 대응 이력을 한 화면에서 확인합니다.</span></div>
+      <WriterGate>
+        {(requestWriter) => <section className="export-toolbar" aria-label="아카이브 내보내기">
+          <span>현재 필터 결과 다운로드</span>
+          <div className="button-row">
+            <button className="secondary-button" type="button" onClick={() => exportArchive("csv", requestWriter)}>CSV 다운로드</button>
+            <button className="secondary-button" type="button" onClick={() => exportArchive("xlsx", requestWriter)}>XLSX 다운로드</button>
+          </div>
+          {exportError && <p role="alert">아카이브를 다운로드하지 못했습니다.</p>}
+        </section>}
+      </WriterGate>
       <ArchiveFilters query={query} onApply={(next) => navigate({ ...next, page: undefined })} />
       <div className={`archive-layout${caseId ? " has-preview" : ""}`}>
         <ArchiveResults
