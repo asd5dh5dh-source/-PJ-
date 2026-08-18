@@ -1,11 +1,16 @@
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import date
 import re
+from threading import Event, Lock
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.repositories.voc_cases import VocCaseRepository
+from app.services.search import ArchiveSearchService
 
 
 VALID_REQUEST = {
@@ -165,3 +170,100 @@ def test_creation_refreshes_once_and_next_archive_search_reuses_it(client, repos
     assert response.json()["case_id"] in {
         item["case_id"] for item in refreshed_response.json()["items"]
     }
+
+
+def test_repository_enforces_manual_origin_and_status(monkeypatch):
+    class Result:
+        def fetchone(self):
+            return {"case_id": "WEB-ABC123ABC123"}
+
+    class Connection:
+        def execute(self, query, params):
+            self.query = query
+            self.params = params
+            return Result()
+
+    connection = Connection()
+
+    @contextmanager
+    def fake_connection():
+        yield connection
+
+    monkeypatch.setattr(
+        "app.repositories.voc_cases.database_connection",
+        fake_connection,
+    )
+
+    VocCaseRepository().create(
+        {
+            "case_id": "WEB-ABC123ABC123",
+            "customer_request": "Manual request",
+            "record_origin": "historical",
+            "final_status": "closed",
+            "search_document": "Manual request Mail body",
+            "original_mail_body": "Mail body",
+            "request_embedding": [1.0],
+            "response_embedding": [1.0],
+        }
+    )
+
+    assert connection.params == (
+        "WEB-ABC123ABC123",
+        "Manual request",
+        "user_input",
+        "received",
+        "Manual request Mail body",
+        "Mail body",
+    )
+    assert "embedding" not in connection.query
+
+
+def test_shared_search_state_serializes_refresh_and_rank():
+    class CollisionDetectingIndex:
+        def __init__(self):
+            self.entered = Event()
+            self.release = Event()
+            self.overlap = Event()
+            self.guard = Lock()
+            self.active = False
+
+        def _access(self):
+            with self.guard:
+                if self.active:
+                    self.overlap.set()
+                self.active = True
+                self.entered.set()
+            self.release.wait(timeout=2)
+            with self.guard:
+                self.active = False
+
+        def refresh(self, candidates):
+            self._access()
+
+        def rank(self, query, candidates, query_subtype, limit):
+            self._access()
+            return []
+
+    index = CollisionDetectingIndex()
+    service = ArchiveSearchService(FakeRepository(), index)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        rank = executor.submit(
+            service.rank_similar,
+            {
+                "customer_request": "Gas generation",
+                "voc_subtype": "Gas Generation",
+            },
+            [],
+            3,
+        )
+        assert index.entered.wait(timeout=1)
+        refresh = executor.submit(service.refresh)
+        try:
+            overlap_detected = index.overlap.wait(timeout=0.2)
+        finally:
+            index.release.set()
+        rank.result(timeout=1)
+        refresh.result(timeout=1)
+
+    assert not overlap_detected

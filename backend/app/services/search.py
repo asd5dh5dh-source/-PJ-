@@ -1,4 +1,5 @@
 from datetime import date
+from threading import RLock
 from typing import Any
 
 from app.schemas import ArchiveQuery, ArchiveSort
@@ -20,12 +21,14 @@ class ArchiveSearchService:
     def __init__(self, repository: Any, index: Bm25Index | None = None) -> None:
         self.repository = repository
         self.index = index or Bm25Index()
+        self._lock = RLock()
         self._candidate_cache: dict[tuple[tuple[str, Any], ...], list[dict[str, Any]]] = {}
 
     def refresh(self) -> None:
-        candidates = self.repository.list_candidates()
-        self._candidate_cache = {(): candidates}
-        self.index.refresh(candidates)
+        with self._lock:
+            candidates = self.repository.list_candidates()
+            self._candidate_cache = {(): candidates}
+            self.index.refresh(candidates)
 
     def _list_candidates(self, filters: dict[str, Any]) -> list[dict[str, Any]]:
         key = tuple(sorted(filters.items()))
@@ -39,21 +42,27 @@ class ArchiveSearchService:
         effective_sort: ArchiveSort,
     ) -> dict[str, Any]:
         filters = query.model_dump(include=self._FILTERS, exclude_none=True)
-        candidates = self._list_candidates(filters)
-        items = [dict(case) for case in candidates]
+        with self._lock:
+            candidates = self._list_candidates(filters)
+            items = [dict(case) for case in candidates]
 
-        if query.q:
-            ranked = self.index.rank(query.q, candidates, query.voc_subtype, len(candidates))
-            cases_by_id = {str(case["case_id"]): dict(case) for case in candidates}
-            items = [
-                cases_by_id[item.case_id]
-                | {
-                    "bm25_score": item.bm25_score,
-                    "final_score": item.final_score,
-                    "matched_keywords": item.matched_keywords,
-                }
-                for item in ranked
-            ]
+            if query.q:
+                ranked = self.index.rank(
+                    query.q,
+                    candidates,
+                    query.voc_subtype,
+                    len(candidates),
+                )
+                cases_by_id = {str(case["case_id"]): dict(case) for case in candidates}
+                items = [
+                    cases_by_id[item.case_id]
+                    | {
+                        "bm25_score": item.bm25_score,
+                        "final_score": item.final_score,
+                        "matched_keywords": item.matched_keywords,
+                    }
+                    for item in ranked
+                ]
 
         if effective_sort != "relevance":
             items.sort(
@@ -85,12 +94,13 @@ class ArchiveSearchService:
                 ],
             )
         )
-        ranked = self.index.rank(
-            query,
-            candidates,
-            source_case.get("voc_subtype"),
-            limit,
-        )
+        with self._lock:
+            ranked = self.index.rank(
+                query,
+                candidates,
+                source_case.get("voc_subtype"),
+                limit,
+            )
         cases_by_id = {str(case["case_id"]): dict(case) for case in candidates}
         return [
             cases_by_id[item.case_id]

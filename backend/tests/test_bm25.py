@@ -54,3 +54,29 @@ def test_rank_reports_query_keywords_present_in_the_searchable_fields(index, can
 
     matched = next(item for item in ranked if item.case_id == "REQ-GAS-CONTENT-MATCH")
     assert matched.matched_keywords == ["gas", "generation"]
+
+
+def test_repeated_terms_keep_scores_positive_and_subtype_boost_improves_rank(index):
+    repeated_term_candidates = [
+        {
+            "case_id": "SUBTYPE-MATCH",
+            "voc_subtype": "Gas Generation",
+            "customer_request": "gas gas gas gas",
+        },
+        {
+            "case_id": "OTHER-SUBTYPE",
+            "voc_subtype": "Other",
+            "customer_request": "gas gas gas gas",
+        },
+    ]
+
+    ranked = index.rank(
+        "gas",
+        repeated_term_candidates,
+        "Gas Generation",
+        2,
+    )
+
+    assert all(item.bm25_score > 0 for item in ranked)
+    assert ranked[0].case_id == "SUBTYPE-MATCH"
+    assert ranked[0].final_score > ranked[1].final_score

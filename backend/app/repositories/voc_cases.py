@@ -84,7 +84,8 @@ class VocCaseRepository:
             ).fetchone()
 
     def create(self, payload: Any) -> dict[str, Any]:
-        source = payload if isinstance(payload, Mapping) else payload.model_dump()
+        source = dict(payload) if isinstance(payload, Mapping) else payload.model_dump()
+        source.update(record_origin="user_input", final_status="received")
         values = {name: source[name] for name in self._CREATE_COLUMNS if name in source}
         columns = ", ".join(values)
         placeholders = ", ".join(["%s"] * len(values))

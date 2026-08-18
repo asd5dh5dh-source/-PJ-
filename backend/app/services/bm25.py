@@ -48,7 +48,7 @@ class Bm25Index:
             ]
             document = _Document(case, tokens, Counter(tokens))
             self._documents.append(document)
-            self._document_frequency.update(document.term_counts)
+            self._document_frequency.update(document.term_counts.keys())
         self._average_length = (
             sum(len(document.tokens) for document in self._documents) / len(self._documents)
             if self._documents
