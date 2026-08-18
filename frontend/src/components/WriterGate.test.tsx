@@ -74,4 +74,35 @@ describe("WriterGate", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("인증하지 못했습니다");
     expect(action).not.toHaveBeenCalled();
   });
+
+  it("traps keyboard focus and restores the trigger when Escape closes", async () => {
+    const action = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <WriterGate>
+        {(requestWriter) => (
+          <button type="button" onClick={() => requestWriter(action)}>보호 작업</button>
+        )}
+      </WriterGate>,
+    );
+
+    const trigger = screen.getByRole("button", { name: "보호 작업" });
+    await user.click(trigger);
+    const writerName = screen.getByLabelText("작성자명");
+    expect(writerName).toHaveFocus();
+    await user.tab();
+    expect(screen.getByLabelText("공용 비밀번호")).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "취소" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "인증 후 계속" })).toHaveFocus();
+    await user.tab();
+    expect(writerName).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expect(action).not.toHaveBeenCalled();
+  });
 });

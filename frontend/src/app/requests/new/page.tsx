@@ -38,7 +38,7 @@ export default function NewRequestPage() {
   const [similarError, setSimilarError] = useState(false);
   const [savedCaseId, setSavedCaseId] = useState("");
   const [similar, setSimilar] = useState<ArchiveItem[]>([]);
-  const [searchText, setSearchText] = useState("");
+  const [searchContext, setSearchContext] = useState({ query: "", subtype: "" });
 
   function analyzeMail() {
     const mail = formRef.current?.elements.namedItem("original_mail_body");
@@ -51,10 +51,15 @@ export default function NewRequestPage() {
     setConfirmed(true);
   }
 
-  async function loadSimilar(query: string) {
+  async function loadSimilar(query: string, subtype: string) {
     setSimilarError(false);
     try {
-      const page = await getArchive({ q: query, final_status: "closed", sort: "relevance" });
+      const page = await getArchive({
+        q: query,
+        voc_subtype: subtype,
+        final_status: "closed",
+        sort: "relevance",
+      });
       setSimilar(page.items.slice(0, 3));
     } catch {
       setSimilarError(true);
@@ -68,8 +73,12 @@ export default function NewRequestPage() {
     try {
       const created = await createVoc(payload, writer);
       setSavedCaseId(created.case_id);
-      setSearchText(payload.customer_request);
-      await loadSimilar(payload.customer_request);
+      const context = {
+        query: [payload.customer_request, payload.original_mail_body].filter(Boolean).join("\n\n"),
+        subtype: payload.voc_subtype ?? "",
+      };
+      setSearchContext(context);
+      await loadSimilar(context.query, context.subtype);
     } catch {
       setSaveError(true);
     } finally {
@@ -79,7 +88,7 @@ export default function NewRequestPage() {
 
   function submit(event: FormEvent<HTMLFormElement>, requestWriter: RequestWriter) {
     event.preventDefault();
-    if (saving) return;
+    if (saving || savedCaseId) return;
     const values = new FormData(event.currentTarget);
     const customerRequest = field(values, "customer_request");
     const vocType = field(values, "voc_type");
@@ -161,7 +170,7 @@ export default function NewRequestPage() {
                   ))}
                   <div className="button-row">
                     <button className="secondary-button" type="button" onClick={() => setTaskCount((count) => count + 1)}>부서 과제 추가</button>
-                    <button className="primary-button" type="submit" disabled={saving}>{saving ? "저장 중..." : "임시 저장"}</button>
+                    <button className="primary-button" type="submit" disabled={saving || Boolean(savedCaseId)}>{savedCaseId ? "저장 완료" : saving ? "저장 중..." : "임시 저장"}</button>
                   </div>
                 </section>
               </>
@@ -179,7 +188,7 @@ export default function NewRequestPage() {
           </div>
           <div className="page-header"><p>TOP 3</p><h2>유사한 종료 사례</h2></div>
           {similarError ? (
-            <div className="state-panel" role="alert"><p>유사 사례를 불러오지 못했습니다.</p><button className="secondary-button" type="button" onClick={() => void loadSimilar(searchText)}>다시 시도</button></div>
+            <div className="state-panel" role="alert"><p>유사 사례를 불러오지 못했습니다.</p><button className="secondary-button" type="button" onClick={() => void loadSimilar(searchContext.query, searchContext.subtype)}>다시 시도</button></div>
           ) : similar.map((item) => (
             <article className="filter-panel" data-testid="similar-case" key={item.case_id}>
               <div className="results-heading"><div><h3>{item.case_id}</h3><p>{item.customer_name ?? "—"}</p></div><span>{item.final_status}</span></div>

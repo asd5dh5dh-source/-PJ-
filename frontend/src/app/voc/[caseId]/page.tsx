@@ -21,6 +21,7 @@ export function VocDetailContent({ caseId }: { caseId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
+  const [stageForm, setStageForm] = useState({ stage: "received" as VocStage, reason: "", ecm_link: "" });
 
   async function refresh() {
     setDetail(await getVoc(caseId));
@@ -45,9 +46,8 @@ export function VocDetailContent({ caseId }: { caseId: string }) {
 
   function changeStage(event: FormEvent<HTMLFormElement>, requestWriter: RequestWriter) {
     event.preventDefault();
-    const values = new FormData(event.currentTarget);
-    const stage = value(values, "stage") as VocStage;
-    const reason = value(values, "reason");
+    const { stage, ecm_link } = stageForm;
+    const reason = stageForm.reason.trim();
     requestWriter(async (writer) => {
       setError("");
       try {
@@ -56,7 +56,7 @@ export function VocDetailContent({ caseId }: { caseId: string }) {
           reason: reason || undefined,
           cancellation_reason: stage === "cancelled" ? reason || undefined : undefined,
           deletion_reason: stage === "deleted" ? reason || undefined : undefined,
-          ecm_link: value(values, "ecm_link") || undefined,
+          ecm_link: ecm_link.trim() || undefined,
         }, writer);
         await refresh();
       } catch {
@@ -88,6 +88,9 @@ export function VocDetailContent({ caseId }: { caseId: string }) {
   }
 
   const latest = detail?.rounds.at(-1);
+  useEffect(() => {
+    if (latest) setStageForm({ stage: latest.stage, reason: "", ecm_link: "" });
+  }, [latest]);
 
   return (
     <AppShell activeSection="voc">
@@ -121,9 +124,9 @@ export function VocDetailContent({ caseId }: { caseId: string }) {
                 <h2 id="stage-action-heading">전체 단계 변경</h2>
                 <form onSubmit={(event) => changeStage(event, requestWriter)}>
                   <div className="filter-grid">
-                    <label><span>전체 단계</span><select name="stage" defaultValue={latest.stage}>{Object.entries(stageLabels).map(([stage, label]) => <option key={stage} value={stage}>{label}</option>)}</select></label>
-                    <label><span>변경 / 취소 / 삭제 사유</span><input name="reason" /></label>
-                    <label><span>ECM 링크</span><input name="ecm_link" type="url" /></label>
+                    <label><span>전체 단계</span><select name="stage" value={stageForm.stage} onChange={(event) => setStageForm((current) => ({ ...current, stage: event.target.value as VocStage }))}>{Object.entries(stageLabels).map(([stage, label]) => <option key={stage} value={stage}>{label}</option>)}</select></label>
+                    <label><span>변경 / 취소 / 삭제 사유</span><input name="reason" value={stageForm.reason} onChange={(event) => setStageForm((current) => ({ ...current, reason: event.target.value }))} /></label>
+                    <label><span>ECM 링크</span><input name="ecm_link" type="url" value={stageForm.ecm_link} onChange={(event) => setStageForm((current) => ({ ...current, ecm_link: event.target.value }))} /></label>
                   </div>
                   <button className="primary-button" type="submit">단계 변경</button>
                 </form>

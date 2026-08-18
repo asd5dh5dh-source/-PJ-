@@ -70,6 +70,39 @@ const detail = {
   ],
 };
 
+const refreshedDetail = {
+  ...detail,
+  rounds: [{
+    ...detail.rounds[0],
+    stage: "department_work",
+    tasks: [{
+      ...detail.rounds[0].tasks[0],
+      status: "completed",
+      response_content: "조치 완료",
+      due_date: "2026-08-21",
+      revision: 1,
+    }],
+  }],
+};
+
+const twoTaskDetail = {
+  ...detail,
+  rounds: [{
+    ...detail.rounds[0],
+    tasks: [
+      detail.rounds[0].tasks[0],
+      {
+        ...detail.rounds[0].tasks[0],
+        id: 8,
+        department: "기술",
+        assignee_name: "Park",
+        manager_name: "Choi",
+        ecm_link: null,
+      },
+    ],
+  }],
+};
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -130,6 +163,55 @@ describe("VOC detail page", () => {
         reviewer_role: "department_manager",
         decision: "approved",
       }),
+    });
+  });
+
+  it("refreshes controlled task and stage fields after detail reload", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(detail))
+      .mockResolvedValueOnce(jsonResponse({ writer_name: "Kim" }))
+      .mockResolvedValueOnce(jsonResponse({ id: 3, decision: "approved" }, 201))
+      .mockResolvedValueOnce(jsonResponse(refreshedDetail));
+    const user = userEvent.setup();
+
+    render(<VocDetailContent caseId="VOC-2026-0001" />);
+    await screen.findByText("품질 · 조치 중");
+    await user.click(screen.getByRole("button", { name: "품질 부서 승인" }));
+    await user.type(screen.getByLabelText("작성자명"), "Kim");
+    await user.type(screen.getByLabelText("공용 비밀번호"), "correct-password");
+    await user.click(screen.getByRole("button", { name: "인증 후 계속" }));
+
+    expect(await screen.findByText("전체 단계: 부서별 검토 요청")).toBeVisible();
+    expect(screen.getByLabelText("과제 상태")).toHaveValue("completed");
+    expect(screen.getByLabelText("대응 내용")).toHaveValue("조치 완료");
+    expect(screen.getByLabelText("완료 예정일")).toHaveValue("2026-08-21");
+    expect(screen.getByLabelText("전체 단계")).toHaveValue("department_work");
+  });
+
+  it("targets the selected task for final rejection", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(twoTaskDetail))
+      .mockResolvedValueOnce(jsonResponse({ writer_name: "Final Kim" }))
+      .mockResolvedValueOnce(jsonResponse({ id: 4, decision: "rejected" }, 201))
+      .mockResolvedValueOnce(jsonResponse(twoTaskDetail));
+    const user = userEvent.setup();
+
+    render(<VocDetailContent caseId="VOC-2026-0001" />);
+    await screen.findByText("기술 · 조치 중");
+    await user.selectOptions(screen.getByLabelText("최종 승인 대상 과제"), "8");
+    await user.click(screen.getByRole("button", { name: "최종 반려" }));
+    await user.type(screen.getByLabelText("작성자명"), "Final Kim");
+    await user.type(screen.getByLabelText("공용 비밀번호"), "correct-password");
+    await user.click(screen.getByRole("button", { name: "인증 후 계속" }));
+
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/tasks/8/review", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Writer-Name": "Final Kim",
+        "X-Writer-Password": "correct-password",
+      },
+      body: JSON.stringify({ reviewer_role: "final_approver", decision: "rejected" }),
     });
   });
 });

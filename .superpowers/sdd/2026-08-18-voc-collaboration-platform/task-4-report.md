@@ -49,3 +49,27 @@ The shared password is held only by `WriterGate`'s in-memory React state and pas
 ## Ponytail simplification
 
 No new dependency or client-side credential store was added. Mail extraction uses the two sender/company header patterns already supported by the workflow, and the existing archive endpoint supplies Top 3 results. Add richer mail parsing only when the backend exposes a dedicated parse/preview contract.
+
+## Review correction pass
+
+- Top 3 now sends `customer_request + original_mail_body` as the BM25 query and includes the confirmed VOC subtype plus `closed` status.
+- The draft button becomes a disabled **저장 완료** action as soon as the server assigns a Case ID, including when the subsequent Top 3 lookup fails.
+- Department task and overall-stage forms are controlled and reset from each refreshed detail response.
+- Final approval/rejection uses an explicit active-task selector instead of always targeting the first task.
+- Writer verification traps keyboard focus, closes with Escape, restores focus to the triggering control, and exposes modal description semantics.
+
+Focused RED runs observed two new-request failures, one detail-refresh failure, one final-task targeting failure, and one keyboard-focus failure before their respective fixes. Final review verification:
+
+```text
+npm test -- WriterGate.test.tsx page.test.tsx new-request.test.tsx
+3 test files passed, 14 tests passed
+
+npm test
+6 test files passed, 27 tests passed
+
+npm run build
+Compiled successfully; TypeScript passed
+
+uv run pytest -m "not localdb" -q
+145 passed, 2 deselected
+```

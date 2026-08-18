@@ -119,11 +119,33 @@ describe("new request collaboration workflow", () => {
       body: expect.stringContaining('"department":"Quality"'),
     }));
     expect(fetchMock.mock.calls[2]?.[0]).toContain("/api/archive?");
-    expect(fetchMock.mock.calls[2]?.[0]).toContain("final_status=closed");
+    const topThreeUrl = new URL(String(fetchMock.mock.calls[2]?.[0]), "http://frontend.local");
+    expect(topThreeUrl.searchParams.get("q")).toBe(
+      "Investigate gas generation\n\nFrom: Jane Doe <jane@example.com>\nCompany: Example Materials\n\nPlease investigate.",
+    );
+    expect(topThreeUrl.searchParams.get("voc_subtype")).toBe("Gas Generation");
+    expect(topThreeUrl.searchParams.get("final_status")).toBe("closed");
     expect(screen.getByRole("link", { name: "VOC-2026-0001 관리 화면" })).toHaveAttribute(
       "href",
       "/voc/VOC-2026-0001",
     );
+  });
+
+  it("disables draft creation after the server assigns a case id", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ writer_name: "Kim" }))
+      .mockResolvedValueOnce(jsonResponse(draft, 201))
+      .mockResolvedValueOnce(jsonResponse(similarCases));
+    const user = userEvent.setup();
+    render(<NewRequestPage />);
+
+    await fillRequest(user);
+    await user.click(screen.getByRole("button", { name: "임시 저장" }));
+    await authenticate(user);
+
+    expect(await screen.findByText("임시 저장됨: VOC-2026-0001")).toBeVisible();
+    expect(screen.getByRole("button", { name: "저장 완료" })).toBeDisabled();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("keeps entered values when saving fails", async () => {
