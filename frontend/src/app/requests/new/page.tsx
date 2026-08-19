@@ -80,7 +80,8 @@ export default function NewRequestPage() {
           setTranslationDraft(translatedMail);
           setCustomerRequestDraft(translatedRequest);
           setTranslationState("idle");
-        } catch {
+        } catch (error) {
+          console.error("VOC local translation failed", error);
           setTranslationState("failed");
           setValidationError("한국어 번역을 만들지 못했습니다. 고객 요청을 직접 한국어로 작성해 주세요.");
         }
