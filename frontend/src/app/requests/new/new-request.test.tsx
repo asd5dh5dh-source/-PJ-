@@ -41,6 +41,18 @@ const similarCases = {
   sort: "relevance",
 };
 
+const analysis = {
+  sender_name: "Jane Doe",
+  sender_email: "jane@example.com",
+  sender_company: "Example Materials",
+  translation_draft: null,
+  translation_status: "preview",
+  suggested_voc_type: "Inquiry",
+  suggested_voc_subtype: "Gas Generation",
+  suggested_product_equipment: "NCA",
+  items: similarCases.items,
+};
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -55,7 +67,9 @@ async function fillRequest(user: ReturnType<typeof userEvent.setup>) {
   );
   await user.click(screen.getByRole("button", { name: "메일 내용 확인" }));
   await user.selectOptions(screen.getByLabelText("VOC Type"), "Inquiry");
+  await user.clear(screen.getByLabelText("VOC Subtype"));
   await user.type(screen.getByLabelText("VOC Subtype"), "Gas Generation");
+  await user.clear(screen.getByLabelText("제품 / 설비"));
   await user.type(screen.getByLabelText("제품 / 설비"), "NCA");
   await user.type(screen.getByLabelText("고객 요청"), "Investigate gas generation");
   await user.selectOptions(screen.getByLabelText("우선순위"), "high");
@@ -82,6 +96,7 @@ describe("new request collaboration workflow", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("requires writer verification before saving a draft", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(analysis));
     const user = userEvent.setup();
     render(<NewRequestPage />);
 
@@ -89,11 +104,12 @@ describe("new request collaboration workflow", () => {
     await user.click(screen.getByRole("button", { name: "임시 저장" }));
 
     expect(await screen.findByLabelText("작성자명")).toBeVisible();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("confirms extracted mail fields, saves a server draft, and shows Top 3", async () => {
     fetchMock
+      .mockResolvedValueOnce(jsonResponse(analysis))
       .mockResolvedValueOnce(jsonResponse({ writer_name: "Kim" }))
       .mockResolvedValueOnce(jsonResponse(draft, 201))
       .mockResolvedValueOnce(jsonResponse(similarCases));
@@ -109,7 +125,7 @@ describe("new request collaboration workflow", () => {
 
     expect(await screen.findByText("임시 저장됨: VOC-2026-0001")).toBeVisible();
     expect(await screen.findAllByTestId("similar-case")).toHaveLength(3);
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/voc", expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/voc", expect.objectContaining({
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -118,12 +134,12 @@ describe("new request collaboration workflow", () => {
       },
       body: expect.stringContaining('"department":"Quality"'),
     }));
-    expect(fetchMock.mock.calls[2]?.[0]).toContain("/api/archive?");
-    const topThreeUrl = new URL(String(fetchMock.mock.calls[2]?.[0]), "http://frontend.local");
+    expect(fetchMock.mock.calls[3]?.[0]).toContain("/api/archive?");
+    const topThreeUrl = new URL(String(fetchMock.mock.calls[3]?.[0]), "http://frontend.local");
     expect(topThreeUrl.searchParams.get("q")).toBe(
       "Investigate gas generation\n\nFrom: Jane Doe <jane@example.com>\nCompany: Example Materials\n\nPlease investigate.",
     );
-    expect(topThreeUrl.searchParams.get("voc_subtype")).toBe("Gas Generation");
+    expect(topThreeUrl.searchParams.get("boost_voc_subtype")).toBe("Gas Generation");
     expect(topThreeUrl.searchParams.get("final_status")).toBe("closed");
     expect(screen.getByRole("link", { name: "VOC-2026-0001 관리 화면" })).toHaveAttribute(
       "href",
@@ -131,8 +147,38 @@ describe("new request collaboration workflow", () => {
     );
   });
 
+  it("analyzes a pasted mail before saving and fills the review fields with the Top 3", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      sender_name: "Jane Doe",
+      sender_email: "jane@example.com",
+      sender_company: "Example Materials",
+      translation_draft: "가스 발생을 조사해 주세요.",
+      translation_status: "translated",
+      items: similarCases.items,
+    }));
+    const user = userEvent.setup();
+    render(<NewRequestPage />);
+
+    await user.type(
+      screen.getByLabelText("원본 메일"),
+      "From: Jane Doe <jane@example.com>{enter}Company: Example Materials{enter}{enter}Please investigate gas generation.",
+    );
+    await user.click(screen.getByRole("button", { name: "메일 내용 확인" }));
+
+    expect(await screen.findAllByTestId("similar-case")).toHaveLength(3);
+    expect(screen.getByLabelText("발신자명")).toHaveValue("Jane Doe");
+    expect(screen.getByLabelText("발신자 이메일")).toHaveValue("jane@example.com");
+    expect(screen.getByLabelText("발신 회사")).toHaveValue("Example Materials");
+    expect(screen.getByLabelText("한국어 번역 초안")).toHaveValue("가스 발생을 조사해 주세요.");
+    expect(fetchMock).toHaveBeenCalledWith("/api/mail-analysis", expect.objectContaining({
+      method: "POST",
+      body: expect.stringContaining("Please investigate gas generation."),
+    }));
+  });
+
   it("disables draft creation after the server assigns a case id", async () => {
     fetchMock
+      .mockResolvedValueOnce(jsonResponse(analysis))
       .mockResolvedValueOnce(jsonResponse({ writer_name: "Kim" }))
       .mockResolvedValueOnce(jsonResponse(draft, 201))
       .mockResolvedValueOnce(jsonResponse(similarCases));
@@ -145,11 +191,12 @@ describe("new request collaboration workflow", () => {
 
     expect(await screen.findByText("임시 저장됨: VOC-2026-0001")).toBeVisible();
     expect(screen.getByRole("button", { name: "저장 완료" })).toBeDisabled();
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it("keeps entered values when saving fails", async () => {
     fetchMock
+      .mockResolvedValueOnce(jsonResponse(analysis))
       .mockResolvedValueOnce(jsonResponse({ writer_name: "Kim" }))
       .mockResolvedValueOnce(jsonResponse({ detail: "failed" }, 500));
     const user = userEvent.setup();
@@ -164,6 +211,7 @@ describe("new request collaboration workflow", () => {
   });
 
   it("rejects trimmed-empty required fields without opening writer verification", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(analysis));
     const user = userEvent.setup();
     render(<NewRequestPage />);
 
@@ -175,12 +223,13 @@ describe("new request collaboration workflow", () => {
     await user.click(screen.getByRole("button", { name: "임시 저장" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("고객 요청");
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("disables draft saving while the request is pending", async () => {
     let resolveSave!: (response: Response) => void;
     fetchMock
+      .mockResolvedValueOnce(jsonResponse(analysis))
       .mockResolvedValueOnce(jsonResponse({ writer_name: "Kim" }))
       .mockReturnValueOnce(new Promise((resolve) => { resolveSave = resolve; }));
     const user = userEvent.setup();
@@ -191,12 +240,13 @@ describe("new request collaboration workflow", () => {
     await authenticate(user);
 
     expect(await screen.findByRole("button", { name: "저장 중..." })).toBeDisabled();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     resolveSave(jsonResponse(draft, 201));
   });
 
   it("retries a failed Top 3 lookup without clearing the request", async () => {
     fetchMock
+      .mockResolvedValueOnce(jsonResponse(analysis))
       .mockResolvedValueOnce(jsonResponse({ writer_name: "Kim" }))
       .mockResolvedValueOnce(jsonResponse(draft, 201))
       .mockResolvedValueOnce(jsonResponse({ detail: "failed" }, 500))

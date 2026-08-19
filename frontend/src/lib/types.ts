@@ -6,6 +6,7 @@ export type ArchiveQuery = {
   product_equipment?: string;
   voc_type?: string;
   voc_subtype?: string;
+  boost_voc_subtype?: string;
   final_status?: string;
   responsible_department?: string;
   received_from?: string;
@@ -69,6 +70,29 @@ export type DashboardData = {
     stage?: VocStage | null;
     created_at?: string | null;
   }>;
+  active_requests: Array<{
+    case_id: string;
+    sender_company?: string | null;
+    product_equipment?: string | null;
+    voc_type?: string | null;
+    voc_subtype?: string | null;
+    responsible_departments?: string | null;
+    priority?: "normal" | "high" | null;
+    stage?: VocStage | null;
+    created_at?: string | null;
+  }>;
+};
+
+export type MailAnalysis = {
+  sender_name?: string | null;
+  sender_email?: string | null;
+  sender_company?: string | null;
+  translation_draft?: string | null;
+  translation_status: string;
+  suggested_voc_type?: string | null;
+  suggested_voc_subtype?: string | null;
+  suggested_product_equipment?: string | null;
+  items: ArchiveItem[];
 };
 
 export type NotificationLog = {

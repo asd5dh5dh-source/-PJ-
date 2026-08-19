@@ -12,6 +12,7 @@ class ArchiveSearchService:
         "product_equipment",
         "voc_type",
         "voc_subtype",
+        "boost_voc_subtype",
         "final_status",
         "responsible_department",
         "received_from",
@@ -45,7 +46,9 @@ class ArchiveSearchService:
         query: ArchiveQuery,
         effective_sort: ArchiveSort,
     ) -> dict[str, Any]:
-        filters = query.model_dump(include=self._FILTERS, exclude_none=True)
+        filters = query.model_dump(
+            include=self._FILTERS - {"boost_voc_subtype"}, exclude_none=True
+        )
         with self._lock:
             candidates = self._list_candidates(filters)
             items = [dict(case) for case in candidates]
@@ -54,7 +57,7 @@ class ArchiveSearchService:
                 ranked = self.index.rank(
                     query.q,
                     candidates,
-                    query.voc_subtype,
+                    query.boost_voc_subtype,
                     len(candidates),
                 )
                 cases_by_id = {str(case["case_id"]): dict(case) for case in candidates}

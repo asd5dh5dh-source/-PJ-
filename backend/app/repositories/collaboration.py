@@ -687,10 +687,38 @@ class CollaborationRepository:
                 """,
                 (date_from, date_to),
             ).fetchall()
+            active_requests = connection.execute(
+                """
+                WITH latest_requests AS (
+                    SELECT DISTINCT ON (case_id)
+                           id, case_id, sender_company, product_equipment,
+                           voc_type, voc_subtype, priority, stage, created_at
+                    FROM public.voc_requests
+                    ORDER BY case_id, round_number DESC
+                )
+                SELECT request.case_id, request.sender_company,
+                       request.product_equipment, request.voc_type,
+                       request.voc_subtype, request.priority, request.stage,
+                       request.created_at,
+                       string_agg(DISTINCT task.department, ', ' ORDER BY task.department)
+                         AS responsible_departments
+                FROM latest_requests AS request
+                LEFT JOIN public.department_tasks AS task ON task.voc_request_id = request.id
+                WHERE request.created_at::date BETWEEN %s AND %s
+                  AND request.stage NOT IN ('customer_reply', 'completed', 'cancelled', 'deleted')
+                GROUP BY request.case_id, request.sender_company,
+                         request.product_equipment, request.voc_type,
+                         request.voc_subtype, request.priority, request.stage,
+                         request.created_at
+                ORDER BY request.created_at DESC, request.case_id DESC
+                """,
+                (date_from, date_to),
+            ).fetchall()
         return {
             "stage_counts": stage_counts,
             "due_tasks": due_tasks,
             "recent_requests": recent_requests,
+            "active_requests": active_requests,
         }
 
     def list_notifications(self) -> list[dict[str, Any]]:

@@ -14,6 +14,7 @@ class ArchiveQuery(BaseModel):
     product_equipment: NonEmptyText | None = None
     voc_type: NonEmptyText | None = None
     voc_subtype: NonEmptyText | None = None
+    boost_voc_subtype: NonEmptyText | None = None
     final_status: NonEmptyText | None = None
     responsible_department: NonEmptyText | None = None
     received_from: date | None = None
@@ -70,6 +71,22 @@ class ManualRequest(BaseModel):
 
 
 class SimilarCases(BaseModel):
+    items: list[ArchiveItem]
+
+
+class MailAnalysisRequest(BaseModel):
+    original_mail_body: NonEmptyText
+
+
+class MailAnalysis(BaseModel):
+    sender_name: str | None = None
+    sender_email: str | None = None
+    sender_company: str | None = None
+    translation_draft: str | None = None
+    translation_status: str
+    suggested_voc_type: str | None = None
+    suggested_voc_subtype: str | None = None
+    suggested_product_equipment: str | None = None
     items: list[ArchiveItem]
 
 
@@ -191,7 +208,14 @@ class DashboardRecentRequest(BaseModel):
     created_at: datetime | None = None
 
 
+class DashboardActiveRequest(DashboardRecentRequest):
+    voc_type: str | None = None
+    voc_subtype: str | None = None
+    responsible_departments: str | None = None
+
+
 class DashboardResponse(BaseModel):
     stage_counts: list[DashboardStageCount]
     due_tasks: list[DashboardDueTask]
     recent_requests: list[DashboardRecentRequest]
+    active_requests: list[DashboardActiveRequest]

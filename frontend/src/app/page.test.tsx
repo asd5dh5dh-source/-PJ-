@@ -21,6 +21,13 @@ const dashboard = {
     stage: "in_progress",
     original_mail_body: "private mail",
   }],
+  active_requests: [{
+    case_id: "VOC-2026-0004",
+    sender_company: "Example Materials",
+    voc_type: "Complaint",
+    voc_subtype: "Gas Generation",
+    stage: "in_progress",
+  }],
 };
 
 describe("DashboardPage", () => {
@@ -39,8 +46,9 @@ describe("DashboardPage", () => {
 
     expect(await screen.findByRole("heading", { name: "단계별 VOC 현황" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "마감 임박/지연 부서 과제" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "최근 고객 요청" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "현재 진행 VOC" })).toBeVisible();
     expect(screen.getByText("Example Materials")).toBeVisible();
+    expect(screen.getByText("Complaint · Gas Generation")).toBeVisible();
     expect(screen.queryByText("private@example.com")).not.toBeInTheDocument();
     expect(screen.queryByText("private mail")).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/dashboard?period=30d", expect.any(Object));

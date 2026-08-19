@@ -8,6 +8,7 @@ import type {
   DepartmentTask,
   MasterRecord,
   MasterResource,
+  MailAnalysis,
   NotificationLog,
   TaskReview,
   VocCreateInput,
@@ -58,6 +59,10 @@ async function postJson<T>(path: string, payload: unknown, writer?: WriterCreden
 export function getArchive(query: ArchiveQuery, signal?: AbortSignal) {
   const search = queryString(query);
   return getJson<ArchivePageData>(`/api/archive${search ? `?${search}` : ""}`, signal);
+}
+
+export function analyzeMail(original_mail_body: string) {
+  return postJson<MailAnalysis>("/api/mail-analysis", { original_mail_body });
 }
 
 export function getArchiveDetail(caseId: string, signal?: AbortSignal) {

@@ -75,9 +75,9 @@ export default function DashboardPanels() {
             <h2 id="due-panel-heading">마감 임박/지연 부서 과제</h2>
             {data.due_tasks.length ? <ul>{data.due_tasks.map((task) => <li key={task.id}><a href={task.case_id ? `/voc/${task.case_id}` : undefined}>{task.case_id ?? `과제 #${task.id}`}</a><span>{task.department ?? "담당 부서 미정"} · {taskLabels[task.status] ?? task.status}</span>{task.due_date && <small>기한 {task.due_date}</small>}</li>)}</ul> : <p>마감 임박 또는 지연 과제가 없습니다.</p>}
           </section>
-          <section className="dashboard-panel" aria-labelledby="recent-panel-heading">
-            <h2 id="recent-panel-heading">최근 고객 요청</h2>
-            {data.recent_requests.length ? <ul>{data.recent_requests.map((request) => <li key={request.case_id}><a href={`/voc/${request.case_id}`}>{request.case_id}</a><span>{request.sender_company ?? "고객사 미정"}</span>{request.product_equipment && <small>{request.product_equipment}</small>}</li>)}</ul> : <p>최근 고객 요청이 없습니다.</p>}
+          <section className="dashboard-panel" aria-labelledby="active-panel-heading">
+            <h2 id="active-panel-heading">현재 진행 VOC</h2>
+            {data.active_requests.length ? <ul>{data.active_requests.map((request) => <li key={request.case_id}><a href={`/voc/${request.case_id}`}>{request.case_id}</a><span>{request.sender_company ?? "고객사 미정"}</span>{request.voc_type && request.voc_subtype && <small>{request.voc_type} · {request.voc_subtype}</small>}{request.responsible_departments && <small>담당 {request.responsible_departments}</small>}{request.stage && <small>{stageLabels[request.stage] ?? request.stage}</small>}</li>)}</ul> : <p>진행 중인 VOC가 없습니다.</p>}
           </section>
         </div>
       )}

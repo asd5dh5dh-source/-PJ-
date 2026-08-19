@@ -40,6 +40,13 @@ class OperationsRepository:
             "stage_counts": [{"stage": "received", "count": 2}],
             "due_tasks": [{"id": 4, "status": "delayed"}],
             "recent_requests": [{"case_id": "VOC-2026-0002"}],
+            "active_requests": [{
+                "case_id": "VOC-2026-0002",
+                "sender_company": "Example Materials",
+                "voc_type": "Complaint",
+                "voc_subtype": "Gas Generation",
+                "stage": "in_progress",
+            }],
         }
 
     def list_notifications(self):
@@ -93,6 +100,13 @@ def test_dashboard_defaults_to_recent_thirty_days(client, repository):
     assert response.json()["stage_counts"] == [{"stage": "received", "count": 2}]
     assert response.json()["due_tasks"] == [{"id": 4, "status": "delayed"}]
     assert response.json()["recent_requests"] == [{"case_id": "VOC-2026-0002"}]
+    assert response.json()["active_requests"] == [{
+        "case_id": "VOC-2026-0002",
+        "sender_company": "Example Materials",
+        "voc_type": "Complaint",
+        "voc_subtype": "Gas Generation",
+        "stage": "in_progress",
+    }]
 
 
 def test_dashboard_strips_sensitive_request_and_task_fields(client, repository):
@@ -117,6 +131,7 @@ def test_dashboard_strips_sensitive_request_and_task_fields(client, repository):
                 "translation_draft": "private translation",
             }
         ],
+        "active_requests": [],
     }
 
     payload = client.get("/api/dashboard").json()
@@ -137,6 +152,7 @@ def test_dashboard_strips_sensitive_request_and_task_fields(client, repository):
             "stage": "received",
         }
     ]
+    assert payload["active_requests"] == []
 
 
 def test_dashboard_accepts_custom_date_range(client, repository):

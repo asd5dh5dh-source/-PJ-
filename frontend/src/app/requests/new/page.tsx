@@ -6,18 +6,8 @@ import type { FormEvent } from "react";
 import AppShell from "@/components/AppShell";
 import WriterGate from "@/components/WriterGate";
 import type { RequestWriter } from "@/components/WriterGate";
-import { createVoc, getArchive } from "@/lib/api";
+import { analyzeMail, createVoc, getArchive } from "@/lib/api";
 import type { ArchiveItem, VocCreateInput, WriterCredentials } from "@/lib/types";
-
-function parseMail(mail: string) {
-  const sender = mail.match(/^From:\s*(.*?)\s*<([^>]+)>\s*$/im);
-  const company = mail.match(/^Company:\s*(.+?)\s*$/im);
-  return {
-    sender_name: sender?.[1]?.trim() ?? "",
-    sender_email: sender?.[2]?.trim() ?? "",
-    sender_company: company?.[1]?.trim() ?? "",
-  };
-}
 
 function field(values: FormData, name: string) {
   return String(values.get(name) ?? "").trim();
@@ -31,6 +21,8 @@ export default function NewRequestPage() {
   const formRef = useRef<HTMLFormElement>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [parsed, setParsed] = useState({ sender_name: "", sender_email: "", sender_company: "" });
+  const [suggestions, setSuggestions] = useState({ voc_type: "", voc_subtype: "", product_equipment: "" });
+  const [translationDraft, setTranslationDraft] = useState("");
   const [taskCount, setTaskCount] = useState(1);
   const [saving, setSaving] = useState(false);
   const [validationError, setValidationError] = useState("");
@@ -40,15 +32,32 @@ export default function NewRequestPage() {
   const [similar, setSimilar] = useState<ArchiveItem[]>([]);
   const [searchContext, setSearchContext] = useState({ query: "", subtype: "" });
 
-  function analyzeMail() {
+  async function analyzePastedMail() {
     const mail = formRef.current?.elements.namedItem("original_mail_body");
     if (!(mail instanceof HTMLTextAreaElement) || !mail.value.trim()) {
       setValidationError("원본 메일을 입력해 주세요.");
       return;
     }
-    setParsed(parseMail(mail.value));
-    setValidationError("");
-    setConfirmed(true);
+    setSimilarError(false);
+    try {
+      const analysis = await analyzeMail(mail.value);
+      setParsed({
+        sender_name: analysis.sender_name ?? "",
+        sender_email: analysis.sender_email ?? "",
+        sender_company: analysis.sender_company ?? "",
+      });
+      setSuggestions({
+        voc_type: analysis.suggested_voc_type ?? "",
+        voc_subtype: analysis.suggested_voc_subtype ?? "",
+        product_equipment: analysis.suggested_product_equipment ?? "",
+      });
+      setTranslationDraft(analysis.translation_draft ?? "");
+      setSimilar(analysis.items);
+      setValidationError("");
+      setConfirmed(true);
+    } catch {
+      setValidationError("메일 분석을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    }
   }
 
   async function loadSimilar(query: string, subtype: string) {
@@ -56,7 +65,7 @@ export default function NewRequestPage() {
     try {
       const page = await getArchive({
         q: query,
-        voc_subtype: subtype,
+        boost_voc_subtype: subtype,
         final_status: "closed",
         sort: "relevance",
       });
@@ -112,6 +121,7 @@ export default function NewRequestPage() {
       sender_name: optional(field(values, "sender_name")),
       sender_email: optional(field(values, "sender_email")),
       sender_company: optional(field(values, "sender_company")),
+      translation_draft: optional(field(values, "translation_draft")),
       voc_type: vocType,
       voc_subtype: vocSubtype,
       product_equipment: optional(field(values, "product_equipment")),
@@ -135,21 +145,22 @@ export default function NewRequestPage() {
             <section className="filter-panel" aria-labelledby="mail-step-heading">
               <h2 id="mail-step-heading">1. 메일 붙여넣기</h2>
               <label className="search-field"><span>원본 메일</span><textarea name="original_mail_body" rows={8} /></label>
-              <button className="secondary-button" type="button" onClick={analyzeMail}>메일 내용 확인</button>
+              <button className="secondary-button" type="button" onClick={() => void analyzePastedMail()}>메일 내용 확인</button>
             </section>
             {confirmed && (
               <>
                 <section className="filter-panel" aria-labelledby="confirm-step-heading">
                   <h2 id="confirm-step-heading">2. 추출 정보 확인</h2>
                   <div className="filter-grid">
-                    <label><span>발신자명</span><input name="sender_name" defaultValue={parsed.sender_name} /></label>
-                    <label><span>발신자 이메일</span><input name="sender_email" type="email" defaultValue={parsed.sender_email} /></label>
-                    <label><span>발신 회사</span><input name="sender_company" defaultValue={parsed.sender_company} /></label>
-                    <label><span>VOC Type</span><select name="voc_type" defaultValue=""><option value="">선택</option><option value="Inquiry">Inquiry</option><option value="Complaint">Complaint</option><option value="Request">Request</option></select></label>
-                    <label><span>VOC Subtype</span><input name="voc_subtype" /></label>
-                    <label><span>제품 / 설비</span><input name="product_equipment" /></label>
+                    <label><span>발신자명</span><input name="sender_name" value={parsed.sender_name} onChange={(event) => setParsed((value) => ({ ...value, sender_name: event.target.value }))} /></label>
+                    <label><span>발신자 이메일</span><input name="sender_email" type="email" value={parsed.sender_email} onChange={(event) => setParsed((value) => ({ ...value, sender_email: event.target.value }))} /></label>
+                    <label><span>발신 회사</span><input name="sender_company" value={parsed.sender_company} onChange={(event) => setParsed((value) => ({ ...value, sender_company: event.target.value }))} /></label>
+                    <label><span>VOC Type</span><select name="voc_type" value={suggestions.voc_type} onChange={(event) => setSuggestions((value) => ({ ...value, voc_type: event.target.value }))}><option value="">선택</option><option value="Inquiry">Inquiry</option><option value="Complaint">Complaint</option><option value="Request">Request</option></select></label>
+                    <label><span>VOC Subtype</span><input name="voc_subtype" value={suggestions.voc_subtype} onChange={(event) => setSuggestions((value) => ({ ...value, voc_subtype: event.target.value }))} /></label>
+                    <label><span>제품 / 설비</span><input name="product_equipment" value={suggestions.product_equipment} onChange={(event) => setSuggestions((value) => ({ ...value, product_equipment: event.target.value }))} /></label>
                     <label><span>우선순위</span><select name="priority" defaultValue="normal"><option value="normal">일반</option><option value="high">높음</option></select></label>
                   </div>
+                  {translationDraft && <label className="search-field"><span>한국어 번역 초안</span><textarea name="translation_draft" rows={4} value={translationDraft} onChange={(event) => setTranslationDraft(event.target.value)} /></label>}
                   <label className="search-field"><span>고객 요청</span><textarea name="customer_request" rows={4} /></label>
                 </section>
                 <section className="filter-panel" aria-labelledby="task-step-heading">
@@ -180,13 +191,9 @@ export default function NewRequestPage() {
           </form>
         )}
       </WriterGate>
-      {savedCaseId && (
-        <section aria-labelledby="draft-result-heading">
-          <div className="results-heading filter-panel">
-            <div><h2 id="draft-result-heading">임시 저장됨: {savedCaseId}</h2><p>전체 단계는 요청 접수로 시작합니다.</p></div>
-            <a className="primary-link" href={`/voc/${encodeURIComponent(savedCaseId)}`} aria-label={`${savedCaseId} 관리 화면`}>관리 화면</a>
-          </div>
-          <div className="page-header"><p>TOP 3</p><h2>유사한 종료 사례</h2></div>
+      {confirmed && (
+        <section aria-labelledby="similar-result-heading">
+          <div className="page-header"><p>TOP 3</p><h2 id="similar-result-heading">유사한 종료 사례</h2></div>
           {similarError ? (
             <div className="state-panel" role="alert"><p>유사 사례를 불러오지 못했습니다.</p><button className="secondary-button" type="button" onClick={() => void loadSimilar(searchContext.query, searchContext.subtype)}>다시 시도</button></div>
           ) : similar.map((item) => (
@@ -198,6 +205,7 @@ export default function NewRequestPage() {
           ))}
         </section>
       )}
+      {savedCaseId && <section className="results-heading filter-panel"><div><h2>임시 저장됨: {savedCaseId}</h2><p>전체 단계는 요청 접수로 시작합니다.</p></div><a className="primary-link" href={`/voc/${encodeURIComponent(savedCaseId)}`} aria-label={`${savedCaseId} 관리 화면`}>관리 화면</a></section>}
     </AppShell>
   );
 }
