@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from app.db import database_connection
+from app.services.text import clean_customer_request
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,16 @@ class VocCaseRepository:
         "received_at",
     )
 
+    @staticmethod
+    def _display_case(case: dict[str, Any] | None) -> dict[str, Any] | None:
+        if case is None:
+            return None
+        if "customer_request" in case:
+            case["customer_request"] = clean_customer_request(
+                case.get("customer_request"), case.get("original_mail_body")
+            )
+        return case
+
     def dataset_summary(self) -> DatasetSummary:
         with database_connection() as connection:
             row = connection.execute(
@@ -75,14 +86,17 @@ class VocCaseRepository:
             query += " WHERE " + " AND ".join(clauses)
         query += " ORDER BY received_at DESC"
         with database_connection() as connection:
-            return connection.execute(query, tuple(params)).fetchall()
+            return [
+                self._display_case(case)
+                for case in connection.execute(query, tuple(params)).fetchall()
+            ]
 
     def get(self, case_id: str) -> dict[str, Any] | None:
         with database_connection() as connection:
-            return connection.execute(
+            return self._display_case(connection.execute(
                 "SELECT * FROM public.voc_cases WHERE case_id = %s",
                 (case_id,),
-            ).fetchone()
+            ).fetchone())
 
     def create(self, payload: Any) -> dict[str, Any]:
         source = dict(payload) if isinstance(payload, Mapping) else payload.model_dump()
