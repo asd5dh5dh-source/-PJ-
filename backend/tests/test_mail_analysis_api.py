@@ -156,3 +156,14 @@ def test_mail_analysis_extracts_japanese_sender_topic_and_product():
     assert payload["sender_company"] == "Missbusy"
     assert payload["suggested_voc_subtype"] == "Packing Damage"
     assert payload["suggested_product_equipment"] == "LFP"
+
+
+def test_mail_analysis_detects_product_adjacent_to_japanese_characters():
+    client = TestClient(create_app(ArchiveRepository(), collaboration_repository=CollaborationRepository()))
+
+    response = client.post(
+        "/api/mail-analysis",
+        json={"original_mail_body": "件名：Unknown Topic\n納入されたLFP Lotを使用したセル評価です。"},
+    )
+
+    assert response.json()["suggested_product_equipment"] == "LFP"

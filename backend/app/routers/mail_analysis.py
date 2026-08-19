@@ -52,7 +52,7 @@ def _request_summary(raw_mail: str) -> str:
 
 
 def _product_equipment(raw_mail: str, suggested: dict) -> str | None:
-    match = re.search(r"\b(NCA|NCM\d*|NCMA|LFP|LMFP)\b", raw_mail, re.I)
+    match = re.search(r"(?<![A-Za-z0-9])(NCA|NCM\d*|NCMA|LFP|LMFP)(?![A-Za-z0-9])", raw_mail, re.I)
     return match.group(1).upper() if match else suggested.get("product_equipment")
 
 
