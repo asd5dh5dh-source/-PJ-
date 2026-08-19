@@ -3,17 +3,17 @@ from datetime import date
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.routers import mail_analysis
 
 
 class ArchiveRepository:
     def list_candidates(self, filters=None, **filter_values):
-        assert filters == {"final_status": "closed"}
-        return [
+        cases = [
             {
                 "case_id": "COM-001",
                 "customer_name": "Example Materials",
-                "customer_request": "Investigate gas generation",
-                "original_mail_body": "Gas generation was reported.",
+                "customer_request": "Investigate gas generation. Impurity Control LFP lot containment root cause action",
+                "original_mail_body": "Gas generation was reported. Impurity Control LFP lot containment root cause action was reported.",
                 "voc_type": "Inquiry",
                 "voc_subtype": "Gas Generation",
                 "product_equipment": "NCA",
@@ -22,7 +22,25 @@ class ArchiveRepository:
                 "final_status": "closed",
                 "record_origin": "historical",
                 "received_at": date(2026, 1, 1),
-            }
+            },
+            {
+                "case_id": "COM-002",
+                "customer_name": "Example Materials",
+                "customer_request": "Investigate impurity control and lot performance deviation",
+                "original_mail_body": "Impurity Control LFP lot containment and root cause review.",
+                "voc_type": "Complaint",
+                "voc_subtype": "Impurity Control",
+                "product_equipment": "LFP",
+                "priority": "High",
+                "responsible_departments": "Quality",
+                "final_status": "closed",
+                "record_origin": "historical",
+                "received_at": date(2026, 1, 2),
+            },
+        ]
+        return [
+            case for case in cases
+            if all(str(case.get(key, "")).casefold() == str(value).casefold() for key, value in (filters or {}).items())
         ]
 
     def get(self, case_id):
@@ -86,3 +104,21 @@ def test_mail_analysis_marks_no_history_when_no_keyword_matches_a_closed_case():
     payload = response.json()
     assert payload["suggested_voc_subtype"] == "\uacfc\uac70 \uc774\ub825 \uc5c6\uc74c"
     assert payload["items"] == []
+
+
+def test_mail_analysis_uses_explicit_mail_topic_before_a_keyword_nearest_subtype():
+    client = TestClient(create_app(ArchiveRepository(), collaboration_repository=CollaborationRepository()))
+
+    response = client.post(
+        "/api/mail-analysis",
+        json={"original_mail_body": """안녕하세요. 삼성SDI 수입품질 담당자입니다.
+
+[문의/요청 주제: Impurity Control]
+LFP Lot을 적용한 셀 평가에서 저전압 및 성능 편차가 확인되었습니다.
+동일 Lot 영향 범위, 즉시 격리/출하보류 조치, 원인분석 및 재발방지 계획을 제출해 주십시오."""},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert mail_analysis._explicit_voc_subtype("[문의/요청 주제: Impurity Control]") == "Impurity Control"
+    assert payload["suggested_voc_subtype"] == "Impurity Control"

@@ -15,6 +15,15 @@ from app.services.text import tokenize
 _COMMON_MAIL_WORDS = {"please", "kindly", "dear", "regards", "thanks", "thank", "from", "company", "subject", "sent", "mailto", "was", "observed"}
 
 
+def _explicit_voc_subtype(raw_mail: str) -> str | None:
+    match = re.search(
+        r"\[\s*(?:문의\s*/\s*)?요청\s*주제\s*[:：]\s*([^\]\n]+)\]",
+        raw_mail,
+        re.I,
+    )
+    return " ".join(match.group(1).split()) if match else None
+
+
 def _issue_keywords(raw_mail: str) -> list[str]:
     body = raw_mail.split("\n\n", 1)[-1]
     return list(dict.fromkeys(
@@ -63,6 +72,20 @@ def create_mail_analysis_router(
         payload: MailAnalysisRequest,
         settings: Annotated[Settings, Depends(get_settings)],
     ):
+        explicit_subtype = _explicit_voc_subtype(payload.original_mail_body)
+        subtype_history = (
+            search_service.search_archive(
+                ArchiveQuery(
+                    voc_subtype=explicit_subtype,
+                    final_status="closed",
+                    page_size=1,
+                ),
+                "latest",
+            )
+            if explicit_subtype
+            else {"items": []}
+        )
+        matched_subtype = explicit_subtype if subtype_history["items"] else None
         keywords = _issue_keywords(payload.original_mail_body)
         issue_query = " ".join(keywords) or payload.original_mail_body
         first_pass = search_service.search_archive(
@@ -80,31 +103,37 @@ def create_mail_analysis_router(
             ArchiveQuery(
                 q=issue_query,
                 final_status="closed",
-                boost_voc_subtype=suggested.get("voc_subtype"),
+                boost_voc_subtype=matched_subtype or suggested.get("voc_subtype"),
                 sort="relevance",
                 page_size=3,
             ),
             "relevance",
         )
+        ranked_items = [item for item in ranked["items"] if item["final_score"] > 0]
+        best_match = ranked_items[0] if ranked_items else suggested
         translation = TranslationService(settings).translate(payload.original_mail_body)
         return {
             **parse_sender(payload.original_mail_body),
             "translation_draft": translation["translated_text"],
             "translation_status": translation["status"],
-            "suggested_voc_type": suggested.get("voc_type"),
-            "suggested_voc_subtype": suggested.get("voc_subtype") or "과거 이력 없음",
+            "suggested_voc_type": best_match.get("voc_type"),
+            "suggested_voc_subtype": (
+                matched_subtype
+                if explicit_subtype
+                else best_match.get("voc_subtype") or "과거 이력 없음"
+            ) or "과거 이력 없음",
             "suggested_product_equipment": _product_equipment(
-                payload.original_mail_body, suggested
+                payload.original_mail_body, best_match
             ),
             "suggested_customer_request": _request_summary(payload.original_mail_body),
             "suggested_priority": "high"
-            if str(suggested.get("priority", "")).lower() in {"high", "높음"}
+            if str(best_match.get("priority", "")).lower() in {"high", "높음"}
             else "normal",
             "suggested_departments": _departments(
-                suggested.get("responsible_departments")
+                best_match.get("responsible_departments")
             ),
             "extracted_keywords": keywords,
-            "items": [item for item in ranked["items"] if item["final_score"] > 0],
+            "items": ranked_items,
         }
 
     return router
