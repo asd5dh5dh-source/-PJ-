@@ -90,6 +90,7 @@ class MailAnalysis(BaseModel):
     suggested_customer_request: str | None = None
     suggested_priority: Literal["normal", "high"] = "normal"
     suggested_departments: list[str] = Field(default_factory=list)
+    extracted_keywords: list[str] = Field(default_factory=list)
     items: list[ArchiveItem]
 
 

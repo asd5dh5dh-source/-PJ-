@@ -53,6 +53,7 @@ def test_mail_analysis_extracts_sender_and_returns_closed_bm25_cases():
     assert payload["sender_name"] == "Jane Doe"
     assert payload["sender_email"] == "jane@example.com"
     assert payload["sender_company"] == "Example Materials"
+    assert payload["extracted_keywords"] == ["investigate", "gas", "generation"]
     assert payload["suggested_customer_request"] == "Please investigate gas generation."
     assert payload["suggested_product_equipment"] == "NCA"
     assert payload["suggested_priority"] == "high"

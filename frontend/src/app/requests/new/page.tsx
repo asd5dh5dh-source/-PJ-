@@ -23,6 +23,7 @@ export default function NewRequestPage() {
   const [parsed, setParsed] = useState({ sender_name: "", sender_email: "", sender_company: "" });
   const [suggestions, setSuggestions] = useState({ voc_type: "", voc_subtype: "", product_equipment: "" });
   const [translationDraft, setTranslationDraft] = useState("");
+  const [keywords, setKeywords] = useState<string[]>([]);
   const [customerRequestDraft, setCustomerRequestDraft] = useState("");
   const [priority, setPriority] = useState<"normal" | "high">("normal");
   const [taskCount, setTaskCount] = useState(1);
@@ -55,6 +56,7 @@ export default function NewRequestPage() {
         product_equipment: analysis.suggested_product_equipment ?? "",
       });
       setTranslationDraft(analysis.translation_draft ?? "");
+      setKeywords(analysis.extracted_keywords ?? []);
       setCustomerRequestDraft(analysis.suggested_customer_request ?? "");
       setPriority(analysis.suggested_priority);
       setTaskDepartments(analysis.suggested_departments.length ? analysis.suggested_departments : [""]);
@@ -167,6 +169,7 @@ export default function NewRequestPage() {
                     <label><span>제품 / 설비</span><input name="product_equipment" value={suggestions.product_equipment} onChange={(event) => setSuggestions((value) => ({ ...value, product_equipment: event.target.value }))} /></label>
                     <label><span>우선순위</span><select name="priority" value={priority} onChange={(event) => setPriority(event.target.value === "high" ? "high" : "normal")}><option value="normal">일반</option><option value="high">높음</option></select></label>
                   </div>
+                  {keywords.length > 0 && <p className="state-panel">문제 키워드: {keywords.join(", ")}</p>}
                   {translationDraft && <label className="search-field"><span>한국어 번역 초안</span><textarea name="translation_draft" rows={4} value={translationDraft} onChange={(event) => setTranslationDraft(event.target.value)} /></label>}
                   <label className="search-field"><span>고객 요청</span><textarea name="customer_request" rows={4} value={customerRequestDraft} onChange={(event) => setCustomerRequestDraft(event.target.value)} /></label>
                 </section>

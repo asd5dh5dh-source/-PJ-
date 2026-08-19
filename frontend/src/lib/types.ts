@@ -95,6 +95,7 @@ export type MailAnalysis = {
   suggested_customer_request?: string | null;
   suggested_priority: "normal" | "high";
   suggested_departments: string[];
+  extracted_keywords: string[];
   items: ArchiveItem[];
 };
 

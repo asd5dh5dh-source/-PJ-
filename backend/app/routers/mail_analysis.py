@@ -9,6 +9,18 @@ from app.schemas import ArchiveQuery, MailAnalysis, MailAnalysisRequest
 from app.services.mail_parser import parse_sender
 from app.services.search import ArchiveSearchService
 from app.services.translation import TranslationService
+from app.services.text import tokenize
+
+
+_COMMON_MAIL_WORDS = {"please", "kindly", "dear", "regards", "thanks", "thank", "from", "company", "subject", "sent", "mailto"}
+
+
+def _issue_keywords(raw_mail: str) -> list[str]:
+    body = raw_mail.split("\n\n", 1)[-1]
+    return list(dict.fromkeys(
+        token for token in tokenize(body)
+        if len(token) > 2 and token not in _COMMON_MAIL_WORDS
+    ))[:12]
 
 
 def _request_summary(raw_mail: str) -> str:
@@ -41,9 +53,11 @@ def create_mail_analysis_router(
         payload: MailAnalysisRequest,
         settings: Annotated[Settings, Depends(get_settings)],
     ):
+        keywords = _issue_keywords(payload.original_mail_body)
+        issue_query = " ".join(keywords) or payload.original_mail_body
         first_pass = search_service.search_archive(
             ArchiveQuery(
-                q=payload.original_mail_body,
+                q=issue_query,
                 final_status="closed",
                 sort="relevance",
                 page_size=3,
@@ -53,7 +67,7 @@ def create_mail_analysis_router(
         suggested = first_pass["items"][0] if first_pass["items"] else {}
         ranked = search_service.search_archive(
             ArchiveQuery(
-                q=payload.original_mail_body,
+                q=issue_query,
                 final_status="closed",
                 boost_voc_subtype=suggested.get("voc_subtype"),
                 sort="relevance",
@@ -78,6 +92,7 @@ def create_mail_analysis_router(
             "suggested_departments": _departments(
                 suggested.get("responsible_departments")
             ),
+            "extracted_keywords": keywords,
             "items": ranked["items"],
         }
 
