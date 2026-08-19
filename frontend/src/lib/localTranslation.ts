@@ -5,7 +5,8 @@ type TranslationPipeline = (
 ) => Promise<TranslationOutput | TranslationOutput[]>;
 
 const LOCAL_TRANSLATION_MODEL = "noticemkjung/opus-mt-tc-big-en-ko-ONNX";
-export const LOCAL_TRANSLATION_OPTIONS = { device: "wasm", dtype: "q4" };
+export const LOCAL_TRANSLATION_TOKENIZER = "R4kSo1997/opus-mt-en-ko-onnx-int8";
+export const LOCAL_TRANSLATION_OPTIONS = { device: "wasm", dtype: "q4" } as const;
 
 let translatorPromise: Promise<TranslationPipeline> | undefined;
 
@@ -28,17 +29,19 @@ function splitForTranslation(text: string) {
 
 async function getTranslator(): Promise<TranslationPipeline> {
   if (!translatorPromise) {
-    translatorPromise = import("@huggingface/transformers").then(async ({ pipeline }) => {
-      const createPipeline = pipeline as unknown as (
-        task: string,
-        model: string,
-        options: Record<string, string>,
-      ) => Promise<TranslationPipeline>;
-      return createPipeline(
-        "translation",
-        LOCAL_TRANSLATION_MODEL,
-        LOCAL_TRANSLATION_OPTIONS,
-      );
+    translatorPromise = import("@huggingface/transformers").then(async (transformers) => {
+      const [tokenizer, model] = await Promise.all([
+        transformers.AutoTokenizer.from_pretrained(LOCAL_TRANSLATION_TOKENIZER),
+        transformers.AutoModelForSeq2SeqLM.from_pretrained(
+          LOCAL_TRANSLATION_MODEL,
+          LOCAL_TRANSLATION_OPTIONS,
+        ),
+      ]);
+      return new transformers.TranslationPipeline({
+        task: "translation",
+        tokenizer,
+        model,
+      }) as TranslationPipeline;
     });
   }
   return translatorPromise;
