@@ -7,6 +7,7 @@ import AppShell from "@/components/AppShell";
 import WriterGate from "@/components/WriterGate";
 import type { RequestWriter } from "@/components/WriterGate";
 import { analyzeMail, createVoc, getArchive } from "@/lib/api";
+import { translateToKorean } from "@/lib/localTranslation";
 import type { ArchiveItem, VocCreateInput, WriterCredentials } from "@/lib/types";
 
 function field(values: FormData, name: string) {
@@ -23,6 +24,7 @@ export default function NewRequestPage() {
   const [parsed, setParsed] = useState({ sender_name: "", sender_email: "", sender_company: "" });
   const [suggestions, setSuggestions] = useState({ voc_type: "", voc_subtype: "", product_equipment: "" });
   const [translationDraft, setTranslationDraft] = useState("");
+  const [translationState, setTranslationState] = useState<"idle" | "loading" | "failed">("idle");
   const [keywords, setKeywords] = useState<string[]>([]);
   const [customerRequestDraft, setCustomerRequestDraft] = useState("");
   const [priority, setPriority] = useState<"normal" | "high">("normal");
@@ -57,13 +59,34 @@ export default function NewRequestPage() {
       });
       setTranslationDraft(analysis.translation_draft ?? "");
       setKeywords(analysis.extracted_keywords ?? []);
-      setCustomerRequestDraft(analysis.suggested_customer_request ?? "");
+      setCustomerRequestDraft(
+        analysis.translation_status === "bypassed"
+          ? analysis.suggested_customer_request ?? ""
+          : "",
+      );
       setPriority(analysis.suggested_priority);
       setTaskDepartments(analysis.suggested_departments.length ? analysis.suggested_departments : [""]);
       setTaskCount(Math.max(1, analysis.suggested_departments.length));
       setSimilar(analysis.items);
       setValidationError("");
       setConfirmed(true);
+      if (analysis.translation_status !== "bypassed") {
+        setTranslationState("loading");
+        try {
+          const translatedMail = await translateToKorean(mail.value);
+          const translatedRequest = await translateToKorean(
+            analysis.suggested_customer_request ?? mail.value,
+          );
+          setTranslationDraft(translatedMail);
+          setCustomerRequestDraft(translatedRequest);
+          setTranslationState("idle");
+        } catch {
+          setTranslationState("failed");
+          setValidationError("한국어 번역을 만들지 못했습니다. 고객 요청을 직접 한국어로 작성해 주세요.");
+        }
+      } else {
+        setTranslationState("idle");
+      }
     } catch {
       setValidationError("메일 분석을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.");
     }
@@ -170,6 +193,7 @@ export default function NewRequestPage() {
                     <label><span>우선순위</span><select name="priority" value={priority} onChange={(event) => setPriority(event.target.value === "high" ? "high" : "normal")}><option value="normal">일반</option><option value="high">높음</option></select></label>
                   </div>
                   {keywords.length > 0 && <p className="state-panel">문제 키워드: {keywords.join(", ")}</p>}
+                  {translationState === "loading" && <p className="state-panel" role="status">한국어 번역 모델을 준비하고 있습니다.</p>}
                   {translationDraft && <label className="search-field"><span>한국어 번역 초안</span><textarea name="translation_draft" rows={4} value={translationDraft} onChange={(event) => setTranslationDraft(event.target.value)} /></label>}
                   <label className="search-field"><span>고객 요청</span><textarea name="customer_request" rows={4} value={customerRequestDraft} onChange={(event) => setCustomerRequestDraft(event.target.value)} /></label>
                 </section>

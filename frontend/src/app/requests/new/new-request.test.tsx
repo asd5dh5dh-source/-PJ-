@@ -1,8 +1,14 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import NewRequestPage from "./page";
+
+const { translateToKorean } = vi.hoisted(() => ({
+  translateToKorean: vi.fn<(text: string) => Promise<string>>(),
+}));
+
+vi.mock("@/lib/localTranslation", () => ({ translateToKorean }));
 
 const draft = {
   id: 1,
@@ -95,6 +101,12 @@ describe("new request collaboration workflow", () => {
 
   beforeEach(() => {
     fetchMock.mockReset();
+    translateToKorean.mockReset();
+    translateToKorean.mockImplementation(async (text) => (
+      /investigate gas generation/i.test(text)
+        ? "가스 발생을 조사해 주세요."
+        : "번역된 메일 원문"
+    ));
     vi.stubGlobal("fetch", fetchMock);
   });
 
@@ -181,7 +193,7 @@ describe("new request collaboration workflow", () => {
     expect(screen.getByLabelText("발신자 이메일")).toHaveValue("jane@example.com");
     expect(screen.getByLabelText("발신 회사")).toHaveValue("Example Materials");
     expect(screen.getByLabelText("한국어 번역 초안")).toHaveValue("가스 발생을 조사해 주세요.");
-    expect(screen.getByLabelText("고객 요청")).toHaveValue("Investigate gas generation");
+    await waitFor(() => expect(screen.getByLabelText("고객 요청")).toHaveValue("가스 발생을 조사해 주세요."));
     expect(screen.getByLabelText("우선순위")).toHaveValue("high");
     expect(screen.getByLabelText("담당 부서 1")).toHaveValue("Quality");
     expect(screen.getByLabelText("담당 부서 2")).toHaveValue("Engineering");
@@ -189,6 +201,27 @@ describe("new request collaboration workflow", () => {
       method: "POST",
       body: expect.stringContaining("Please investigate gas generation."),
     }));
+  });
+
+  it("keeps a foreign-mail customer request in Korean after local translation", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      ...analysis,
+      translation_status: "preview",
+      translation_draft: null,
+      suggested_customer_request: "Please send the containment plan.",
+    }));
+    translateToKorean
+      .mockResolvedValueOnce("번역된 메일 원문")
+      .mockResolvedValueOnce("봉쇄 조치 계획을 보내 주세요.");
+    const user = userEvent.setup();
+    render(<NewRequestPage />);
+
+    await user.type(screen.getByLabelText("원본 메일"), "Please send the containment plan.");
+    await user.click(screen.getByRole("button", { name: "메일 내용 확인" }));
+
+    expect(await screen.findByLabelText("한국어 번역 초안")).toHaveValue("번역된 메일 원문");
+    expect(screen.getByLabelText("고객 요청")).toHaveValue("봉쇄 조치 계획을 보내 주세요.");
+    expect(translateToKorean).toHaveBeenCalledTimes(2);
   });
 
   it("disables draft creation after the server assigns a case id", async () => {
