@@ -12,7 +12,7 @@ from app.services.translation import TranslationService
 from app.services.text import tokenize
 
 
-_COMMON_MAIL_WORDS = {"please", "kindly", "dear", "regards", "thanks", "thank", "from", "company", "subject", "sent", "mailto"}
+_COMMON_MAIL_WORDS = {"please", "kindly", "dear", "regards", "thanks", "thank", "from", "company", "subject", "sent", "mailto", "was", "observed"}
 
 
 def _issue_keywords(raw_mail: str) -> list[str]:
@@ -29,7 +29,17 @@ def _request_summary(raw_mail: str) -> str:
     if subject:
         return subject
     body = raw_mail.split("\n\n", 1)[-1]
-    return " ".join(body.split())[:500]
+    sentences = re.split(r"(?<=[.!?])\s*|\n+", body)
+    requested = [
+        " ".join(sentence.split())
+        for sentence in sentences
+        if re.search(
+            r"회신|제출|확인.*(?:해|바랍니다)|검토.*(?:해|바랍니다)|조치.*(?:해|바랍니다)|제공.*(?:해|바랍니다)|please|request|provide|confirm|review|investigate",
+            sentence,
+            re.I,
+        )
+    ]
+    return " ".join(requested or sentences).strip()[:500]
 
 
 def _product_equipment(raw_mail: str, suggested: dict) -> str | None:
@@ -64,7 +74,8 @@ def create_mail_analysis_router(
             ),
             "relevance",
         )
-        suggested = first_pass["items"][0] if first_pass["items"] else {}
+        first_items = [item for item in first_pass["items"] if item["final_score"] > 0]
+        suggested = first_items[0] if first_items else {}
         ranked = search_service.search_archive(
             ArchiveQuery(
                 q=issue_query,
@@ -81,7 +92,7 @@ def create_mail_analysis_router(
             "translation_draft": translation["translated_text"],
             "translation_status": translation["status"],
             "suggested_voc_type": suggested.get("voc_type"),
-            "suggested_voc_subtype": suggested.get("voc_subtype"),
+            "suggested_voc_subtype": suggested.get("voc_subtype") or "과거 이력 없음",
             "suggested_product_equipment": _product_equipment(
                 payload.original_mail_body, suggested
             ),
@@ -93,7 +104,7 @@ def create_mail_analysis_router(
                 suggested.get("responsible_departments")
             ),
             "extracted_keywords": keywords,
-            "items": ranked["items"],
+            "items": [item for item in ranked["items"] if item["final_score"] > 0],
         }
 
     return router
