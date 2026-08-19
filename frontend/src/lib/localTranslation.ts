@@ -4,6 +4,9 @@ type TranslationPipeline = (
   text: string,
 ) => Promise<TranslationOutput | TranslationOutput[]>;
 
+const LOCAL_TRANSLATION_MODEL = "noticemkjung/opus-mt-tc-big-en-ko-ONNX";
+export const LOCAL_TRANSLATION_OPTIONS = { device: "wasm", dtype: "q4" };
+
 let translatorPromise: Promise<TranslationPipeline> | undefined;
 
 function splitForTranslation(text: string) {
@@ -33,8 +36,8 @@ async function getTranslator(): Promise<TranslationPipeline> {
       ) => Promise<TranslationPipeline>;
       return createPipeline(
         "translation",
-        "R4kSo1997/opus-mt-en-ko-onnx-int8",
-        { device: "wasm" },
+        LOCAL_TRANSLATION_MODEL,
+        LOCAL_TRANSLATION_OPTIONS,
       );
     });
   }
