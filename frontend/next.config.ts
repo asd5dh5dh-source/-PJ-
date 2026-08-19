@@ -5,7 +5,8 @@ const apiBaseUrl = (
 ).replace(/\/+$/, "");
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  // Next.js 16.3 currently fails Vercel's post-build step with standalone output.
+  output: process.env.VERCEL ? undefined : "standalone",
   async rewrites() {
     return [
       {
