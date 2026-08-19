@@ -15,12 +15,18 @@ def parse_sender(raw_mail: str) -> dict[str, str | None]:
         None,
     )
     if company is None:
-        match = re.search(
-            r"([A-Za-z][A-Za-z .&-]{1,60})\s+(?:[가-힣]+팀\s+)?[가-힣]{2,}\s+(?:담당자|책임자|manager)",
-            raw_mail,
-            re.I,
+        patterns = (
+            r"(?:안녕하세요[,.!]?\s*)?"
+            r"(?P<company>[A-Za-z0-9가-힣][A-Za-z0-9가-힣 .&()/-]{1,60}?)\s+"
+            r"(?:[A-Za-z0-9가-힣]+(?:팀|부|실|그룹|센터))\s+"
+            r"(?:[가-힣]{2,4}|[A-Za-z][A-Za-z .'-]{1,40})\s+"
+            r"(?:담당자|책임자|매니저|manager)",
         )
-        company = match.group(1).strip() if match else None
+        for pattern in patterns:
+            match = re.search(pattern, raw_mail, re.I)
+            if match:
+                company = match.group("company").strip(" .,-")
+                break
     return {
         "sender_name": sender_name.strip() or None,
         "sender_email": sender_email.strip() or None,

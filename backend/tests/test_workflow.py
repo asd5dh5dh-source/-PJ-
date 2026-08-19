@@ -33,6 +33,17 @@ def test_mail_parser_leaves_ambiguous_company_empty():
     assert parsed["sender_company"] is None
 
 
+def test_mail_parser_extracts_company_from_korean_greeting():
+    from app.services.mail_parser import parse_sender
+
+    parsed = parse_sender(
+        "안녕하세요. 포스코퓨처엠 품질부 김철수 담당자입니다.\n"
+        "포장 손상 건에 대한 조치 계획을 회신해 주십시오."
+    )
+
+    assert parsed["sender_company"] == "포스코퓨처엠"
+
+
 def test_overdue_completion_requires_delay_reason_before_it_can_complete():
     from app.services.workflow import WorkflowService
 
