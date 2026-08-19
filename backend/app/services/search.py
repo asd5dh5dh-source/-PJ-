@@ -45,12 +45,19 @@ class ArchiveSearchService:
         self,
         query: ArchiveQuery,
         effective_sort: ArchiveSort,
+        supplemental_candidates: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         filters = query.model_dump(
             include=self._FILTERS - {"boost_voc_subtype"}, exclude_none=True
         )
         with self._lock:
             candidates = self._list_candidates(filters)
+            supplemental = [
+                dict(case)
+                for case in supplemental_candidates or []
+                if self._matches_filters(case, filters)
+            ]
+            candidates = [*candidates, *supplemental]
             items = [dict(case) for case in candidates]
 
             if query.q:
@@ -85,6 +92,33 @@ class ArchiveSearchService:
             "page_size": query.page_size,
             "sort": effective_sort,
         }
+
+    @staticmethod
+    def _matches_filters(case: dict[str, Any], filters: dict[str, Any]) -> bool:
+        for field, expected in filters.items():
+            received_at = case.get("received_at")
+            if field == "received_from":
+                if received_at and received_at < expected:
+                    return False
+                continue
+            if field == "received_to":
+                if received_at and received_at > expected:
+                    return False
+                continue
+            if field == "responsible_department":
+                departments = {
+                    department.strip().casefold()
+                    for department in str(
+                        case.get("responsible_departments") or ""
+                    ).split(",")
+                }
+                if str(expected).casefold() not in departments:
+                    return False
+                continue
+            actual_field = field
+            if str(case.get(actual_field) or "").casefold() != str(expected).casefold():
+                return False
+        return True
 
     def rank_similar(
         self,

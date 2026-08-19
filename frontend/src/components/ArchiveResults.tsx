@@ -4,6 +4,18 @@ function text(value: string | number | null) {
   return value === null || value === "" ? "—" : value;
 }
 
+const statusLabel: Record<string, string> = {
+  received: "요청 접수",
+  managing: "대응 중",
+  in_progress: "대응 중",
+  department_work: "부서별 검토 요청",
+  department_review: "부서 검토",
+  manager_review: "직책자 검토",
+  final_review: "최종 승인 검토",
+  customer_reply: "고객 회신",
+  completed: "완료",
+};
+
 export default function ArchiveResults({
   data,
   loading,
@@ -53,13 +65,13 @@ export default function ArchiveResults({
           <tbody>
             {data.items.map((item) => (
               <tr key={item.case_id} data-testid="archive-result" className={selectedCaseId === item.case_id ? "selected-row" : undefined}>
-                <td><button className="case-link" type="button" onClick={() => onSelect(item.case_id)} aria-pressed={selectedCaseId === item.case_id}>{item.case_id}</button></td>
+                <td>{item.record_origin === "current" ? <a className="case-link" href={`/voc/${encodeURIComponent(item.case_id)}`} aria-label={`${item.case_id} 관리 화면`}>{item.case_id}</a> : <button className="case-link" type="button" onClick={() => onSelect(item.case_id)} aria-pressed={selectedCaseId === item.case_id}>{item.case_id}</button>}</td>
                 <td>{text(item.customer_name)}</td>
                 <td>{text(item.product_equipment)}</td>
                 <td>{text(item.voc_type)}<small>{text(item.voc_subtype)}</small></td>
                 <td className="summary-cell">{text(item.customer_request)}</td>
                 <td>{text(item.responsible_departments)}</td>
-                <td><span className="status-badge">{text(item.final_status)}</span></td>
+                <td><span className="status-badge">{item.final_status ? statusLabel[item.final_status] ?? item.final_status : "—"}</span></td>
                 <td>{text(item.received_at)}</td>
                 <td>{text(item.final_score ?? item.bm25_score)}</td>
                 <td><div className="keyword-list">{item.matched_keywords.length ? item.matched_keywords.map((keyword) => <span key={keyword}>{keyword}</span>) : "—"}</div></td>

@@ -63,6 +63,23 @@ class FakeRepository:
         return next((case for case in CASES if case["case_id"] == case_id), None)
 
 
+class FakeCollaborationRepository:
+    def list_archive_items(self):
+        return [{
+            "case_id": "VOC-2026-0001",
+            "customer_name": "Current Customer",
+            "product_equipment": "NCM811",
+            "voc_type": "Complaint",
+            "voc_subtype": "Packing Damage",
+            "customer_request": "Please confirm the containment plan.",
+            "original_mail_body": "Please confirm the containment plan.",
+            "responsible_departments": "Quality",
+            "received_at": date(2026, 3, 1),
+            "final_status": "received",
+            "record_origin": "current",
+        }]
+
+
 @pytest.fixture
 def repository():
     return FakeRepository()
@@ -70,7 +87,7 @@ def repository():
 
 @pytest.fixture
 def client(repository):
-    return TestClient(create_app(repository))
+    return TestClient(create_app(repository, collaboration_repository=FakeCollaborationRepository()))
 
 
 def test_archive_without_query_defaults_to_all_statuses_and_latest(client, repository):
@@ -80,6 +97,29 @@ def test_archive_without_query_defaults_to_all_statuses_and_latest(client, repos
     assert response.json()["sort"] == "latest"
     assert response.json()["items"][0]["received_at"] >= response.json()["items"][1]["received_at"]
     assert repository.filters == {}
+
+
+def test_archive_includes_current_voc_requests_for_management(client):
+    response = client.get("/api/archive")
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 3
+    assert response.json()["items"][0]["case_id"] == "VOC-2026-0001"
+    assert response.json()["items"][0]["record_origin"] == "current"
+
+
+def test_closed_archive_filter_keeps_current_voc_out_of_reusable_history(client):
+    response = client.get("/api/archive", params={"final_status": "closed"})
+
+    assert response.status_code == 200
+    assert [item["case_id"] for item in response.json()["items"]] == ["COM-001"]
+
+
+def test_archive_filters_current_vocs_by_individual_department(client):
+    response = client.get("/api/archive?responsible_department=Quality")
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["case_id"] == "VOC-2026-0001"
 
 
 def test_archive_query_defaults_to_relevance_and_keeps_filters(client, repository):
@@ -130,6 +170,7 @@ def test_archive_accepts_oldest_sort_without_a_query(client):
     assert [item["case_id"] for item in response.json()["items"]] == [
         "COM-001",
         "REQ-GAS",
+        "VOC-2026-0001",
     ]
 
 

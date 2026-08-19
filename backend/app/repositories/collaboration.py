@@ -632,6 +632,39 @@ class CollaborationRepository:
             )
         return {"case_id": case_id, "rounds": expanded, "audits": audits}
 
+    def list_archive_items(self) -> list[dict[str, Any]]:
+        """Return the latest round of each live VOC in archive-compatible form."""
+        with self.connection_factory() as connection:
+            return connection.execute(
+                """
+                WITH latest_requests AS (
+                    SELECT DISTINCT ON (case_id)
+                           id, case_id, sender_company, product_equipment,
+                           voc_type, voc_subtype, customer_request,
+                           original_mail_body, stage, created_at
+                    FROM public.voc_requests
+                    WHERE stage NOT IN ('cancelled', 'deleted')
+                    ORDER BY case_id, round_number DESC
+                )
+                SELECT request.case_id,
+                       request.sender_company AS customer_name,
+                       request.product_equipment, request.voc_type,
+                       request.voc_subtype, request.customer_request,
+                       request.original_mail_body, request.stage AS final_status,
+                       request.created_at::date AS received_at,
+                       'current'::text AS record_origin,
+                       string_agg(DISTINCT task.department, ', ' ORDER BY task.department)
+                         AS responsible_departments
+                FROM latest_requests AS request
+                LEFT JOIN public.department_tasks AS task ON task.voc_request_id = request.id
+                GROUP BY request.case_id, request.sender_company,
+                         request.product_equipment, request.voc_type,
+                         request.voc_subtype, request.customer_request,
+                         request.original_mail_body, request.stage, request.created_at
+                ORDER BY request.created_at DESC, request.case_id DESC
+                """
+            ).fetchall()
+
     def dashboard(self, date_from, date_to) -> dict[str, list[dict[str, Any]]]:
         with self.connection_factory() as connection:
             stage_counts = connection.execute(

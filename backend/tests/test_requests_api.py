@@ -38,6 +38,11 @@ class AlwaysUnlockedWriterAttemptStore:
         return False
 
 
+class FakeCollaborationRepository:
+    def list_archive_items(self):
+        return []
+
+
 CASES = [
     {
         "case_id": f"CLOSED-{number}",
@@ -144,7 +149,12 @@ def authenticated_client(app):
 
 @pytest.fixture
 def client(repository):
-    return authenticated_client(create_app(repository))
+    return authenticated_client(
+        create_app(
+            repository,
+            collaboration_repository=FakeCollaborationRepository(),
+        )
+    )
 
 
 def test_manual_request_requires_writer_headers(repository):
