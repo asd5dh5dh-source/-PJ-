@@ -11,4 +11,11 @@ describe("AppShell", () => {
     expect(screen.getByText("고객 요청 대응 플랫폼")).toBeVisible();
     expect(screen.getByText("운영 업무 공간")).toBeVisible();
   });
+
+  it("uses the light workspace navigation treatment", () => {
+    const { container } = render(<AppShell activeSection="dashboard"><p>내용</p></AppShell>);
+
+    expect(container.querySelector(".sidebar.sidebar-light")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "대시보드" })).toHaveClass("nav-link");
+  });
 });
