@@ -17,6 +17,8 @@ class ArchiveRepository:
                 "voc_type": "Inquiry",
                 "voc_subtype": "Gas Generation",
                 "product_equipment": "NCA",
+                "priority": "High",
+                "responsible_departments": "Quality, Engineering",
                 "final_status": "closed",
                 "record_origin": "historical",
                 "received_at": date(2026, 1, 1),
@@ -51,5 +53,9 @@ def test_mail_analysis_extracts_sender_and_returns_closed_bm25_cases():
     assert payload["sender_name"] == "Jane Doe"
     assert payload["sender_email"] == "jane@example.com"
     assert payload["sender_company"] == "Example Materials"
+    assert payload["suggested_customer_request"] == "Please investigate gas generation."
+    assert payload["suggested_product_equipment"] == "NCA"
+    assert payload["suggested_priority"] == "high"
+    assert payload["suggested_departments"] == ["Quality", "Engineering"]
     assert payload["items"][0]["case_id"] == "COM-001"
     assert payload["items"][0]["final_score"] > payload["items"][0]["bm25_score"]

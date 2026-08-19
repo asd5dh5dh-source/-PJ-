@@ -23,7 +23,10 @@ export default function NewRequestPage() {
   const [parsed, setParsed] = useState({ sender_name: "", sender_email: "", sender_company: "" });
   const [suggestions, setSuggestions] = useState({ voc_type: "", voc_subtype: "", product_equipment: "" });
   const [translationDraft, setTranslationDraft] = useState("");
+  const [customerRequestDraft, setCustomerRequestDraft] = useState("");
+  const [priority, setPriority] = useState<"normal" | "high">("normal");
   const [taskCount, setTaskCount] = useState(1);
+  const [taskDepartments, setTaskDepartments] = useState<string[]>([""]);
   const [saving, setSaving] = useState(false);
   const [validationError, setValidationError] = useState("");
   const [saveError, setSaveError] = useState(false);
@@ -52,6 +55,10 @@ export default function NewRequestPage() {
         product_equipment: analysis.suggested_product_equipment ?? "",
       });
       setTranslationDraft(analysis.translation_draft ?? "");
+      setCustomerRequestDraft(analysis.suggested_customer_request ?? "");
+      setPriority(analysis.suggested_priority);
+      setTaskDepartments(analysis.suggested_departments.length ? analysis.suggested_departments : [""]);
+      setTaskCount(Math.max(1, analysis.suggested_departments.length));
       setSimilar(analysis.items);
       setValidationError("");
       setConfirmed(true);
@@ -125,7 +132,7 @@ export default function NewRequestPage() {
       voc_type: vocType,
       voc_subtype: vocSubtype,
       product_equipment: optional(field(values, "product_equipment")),
-      priority: field(values, "priority") === "high" ? "high" : "normal",
+      priority,
       tasks,
     };
     setValidationError("");
@@ -158,10 +165,10 @@ export default function NewRequestPage() {
                     <label><span>VOC Type</span><select name="voc_type" value={suggestions.voc_type} onChange={(event) => setSuggestions((value) => ({ ...value, voc_type: event.target.value }))}><option value="">선택</option><option value="Inquiry">Inquiry</option><option value="Complaint">Complaint</option><option value="Request">Request</option></select></label>
                     <label><span>VOC Subtype</span><input name="voc_subtype" value={suggestions.voc_subtype} onChange={(event) => setSuggestions((value) => ({ ...value, voc_subtype: event.target.value }))} /></label>
                     <label><span>제품 / 설비</span><input name="product_equipment" value={suggestions.product_equipment} onChange={(event) => setSuggestions((value) => ({ ...value, product_equipment: event.target.value }))} /></label>
-                    <label><span>우선순위</span><select name="priority" defaultValue="normal"><option value="normal">일반</option><option value="high">높음</option></select></label>
+                    <label><span>우선순위</span><select name="priority" value={priority} onChange={(event) => setPriority(event.target.value === "high" ? "high" : "normal")}><option value="normal">일반</option><option value="high">높음</option></select></label>
                   </div>
                   {translationDraft && <label className="search-field"><span>한국어 번역 초안</span><textarea name="translation_draft" rows={4} value={translationDraft} onChange={(event) => setTranslationDraft(event.target.value)} /></label>}
-                  <label className="search-field"><span>고객 요청</span><textarea name="customer_request" rows={4} /></label>
+                  <label className="search-field"><span>고객 요청</span><textarea name="customer_request" rows={4} value={customerRequestDraft} onChange={(event) => setCustomerRequestDraft(event.target.value)} /></label>
                 </section>
                 <section className="filter-panel" aria-labelledby="task-step-heading">
                   <h2 id="task-step-heading">3. 부서 과제 배정</h2>
@@ -169,7 +176,7 @@ export default function NewRequestPage() {
                     <fieldset className="task-editor" key={index}>
                       <legend>부서 과제 {index + 1}</legend>
                       <div className="filter-grid">
-                        <label><span>담당 부서 {index + 1}</span><input name={`task_department_${index}`} /></label>
+                        <label><span>담당 부서 {index + 1}</span><input name={`task_department_${index}`} value={taskDepartments[index] ?? ""} onChange={(event) => setTaskDepartments((items) => items.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} /></label>
                         <label><span>담당자 {index + 1}</span><input name={`task_assignee_${index}`} /></label>
                         <label><span>담당자 이메일 {index + 1}</span><input name={`task_assignee_email_${index}`} type="email" /></label>
                         <label><span>직책자 {index + 1}</span><input name={`task_manager_${index}`} /></label>
@@ -180,7 +187,7 @@ export default function NewRequestPage() {
                     </fieldset>
                   ))}
                   <div className="button-row">
-                    <button className="secondary-button" type="button" onClick={() => setTaskCount((count) => count + 1)}>부서 과제 추가</button>
+                    <button className="secondary-button" type="button" onClick={() => { setTaskCount((count) => count + 1); setTaskDepartments((items) => [...items, ""]); }}>부서 과제 추가</button>
                     <button className="primary-button" type="submit" disabled={saving || Boolean(savedCaseId)}>{savedCaseId ? "저장 완료" : saving ? "저장 중..." : "임시 저장"}</button>
                   </div>
                 </section>

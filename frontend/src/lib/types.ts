@@ -92,6 +92,9 @@ export type MailAnalysis = {
   suggested_voc_type?: string | null;
   suggested_voc_subtype?: string | null;
   suggested_product_equipment?: string | null;
+  suggested_customer_request?: string | null;
+  suggested_priority: "normal" | "high";
+  suggested_departments: string[];
   items: ArchiveItem[];
 };
 

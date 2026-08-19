@@ -87,6 +87,9 @@ class MailAnalysis(BaseModel):
     suggested_voc_type: str | None = None
     suggested_voc_subtype: str | None = None
     suggested_product_equipment: str | None = None
+    suggested_customer_request: str | None = None
+    suggested_priority: Literal["normal", "high"] = "normal"
+    suggested_departments: list[str] = Field(default_factory=list)
     items: list[ArchiveItem]
 
 

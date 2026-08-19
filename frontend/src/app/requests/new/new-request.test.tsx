@@ -50,6 +50,9 @@ const analysis = {
   suggested_voc_type: "Inquiry",
   suggested_voc_subtype: "Gas Generation",
   suggested_product_equipment: "NCA",
+  suggested_customer_request: "Investigate gas generation",
+  suggested_priority: "high",
+  suggested_departments: ["Quality", "Engineering"],
   items: similarCases.items,
 };
 
@@ -71,8 +74,10 @@ async function fillRequest(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText("VOC Subtype"), "Gas Generation");
   await user.clear(screen.getByLabelText("제품 / 설비"));
   await user.type(screen.getByLabelText("제품 / 설비"), "NCA");
+  await user.clear(screen.getByLabelText("고객 요청"));
   await user.type(screen.getByLabelText("고객 요청"), "Investigate gas generation");
   await user.selectOptions(screen.getByLabelText("우선순위"), "high");
+  await user.clear(screen.getByLabelText("담당 부서 1"));
   await user.type(screen.getByLabelText("담당 부서 1"), "Quality");
   await user.type(screen.getByLabelText("담당자 1"), "Lee");
   await user.type(screen.getByLabelText("직책자 1"), "Kim");
@@ -154,6 +159,12 @@ describe("new request collaboration workflow", () => {
       sender_company: "Example Materials",
       translation_draft: "가스 발생을 조사해 주세요.",
       translation_status: "translated",
+      suggested_voc_type: "Inquiry",
+      suggested_voc_subtype: "Gas Generation",
+      suggested_product_equipment: "NCA",
+      suggested_customer_request: "Investigate gas generation",
+      suggested_priority: "high",
+      suggested_departments: ["Quality", "Engineering"],
       items: similarCases.items,
     }));
     const user = userEvent.setup();
@@ -170,6 +181,10 @@ describe("new request collaboration workflow", () => {
     expect(screen.getByLabelText("발신자 이메일")).toHaveValue("jane@example.com");
     expect(screen.getByLabelText("발신 회사")).toHaveValue("Example Materials");
     expect(screen.getByLabelText("한국어 번역 초안")).toHaveValue("가스 발생을 조사해 주세요.");
+    expect(screen.getByLabelText("고객 요청")).toHaveValue("Investigate gas generation");
+    expect(screen.getByLabelText("우선순위")).toHaveValue("high");
+    expect(screen.getByLabelText("담당 부서 1")).toHaveValue("Quality");
+    expect(screen.getByLabelText("담당 부서 2")).toHaveValue("Engineering");
     expect(fetchMock).toHaveBeenCalledWith("/api/mail-analysis", expect.objectContaining({
       method: "POST",
       body: expect.stringContaining("Please investigate gas generation."),
@@ -219,6 +234,7 @@ describe("new request collaboration workflow", () => {
     await user.click(screen.getByRole("button", { name: "메일 내용 확인" }));
     await user.selectOptions(screen.getByLabelText("VOC Type"), "Inquiry");
     await user.type(screen.getByLabelText("VOC Subtype"), "Gas Generation");
+    await user.clear(screen.getByLabelText("고객 요청"));
     await user.type(screen.getByLabelText("고객 요청"), "   ");
     await user.click(screen.getByRole("button", { name: "임시 저장" }));
 
