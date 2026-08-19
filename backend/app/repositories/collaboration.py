@@ -682,6 +682,41 @@ class CollaborationRepository:
                 """,
                 (date_from, date_to),
             ).fetchall()
+            monthly_voc_counts = connection.execute(
+                """
+                WITH first_requests AS (
+                    SELECT DISTINCT ON (case_id)
+                           case_id, voc_type, created_at
+                    FROM public.voc_requests
+                    ORDER BY case_id, round_number ASC
+                ), latest_requests AS (
+                    SELECT DISTINCT ON (case_id) case_id, stage
+                    FROM public.voc_requests
+                    ORDER BY case_id, round_number DESC
+                )
+                SELECT to_char(
+                           first_request.created_at AT TIME ZONE 'Asia/Seoul',
+                           'YYYY-MM'
+                       ) AS month,
+                       count(*) FILTER (
+                           WHERE lower(first_request.voc_type) = 'complaint'
+                       )::integer AS complaint,
+                       count(*) FILTER (
+                           WHERE lower(first_request.voc_type) = 'request'
+                       )::integer AS request,
+                       count(*) FILTER (
+                           WHERE lower(first_request.voc_type) = 'inquiry'
+                       )::integer AS inquiry
+                FROM first_requests AS first_request
+                JOIN latest_requests AS latest
+                  ON latest.case_id = first_request.case_id
+                WHERE first_request.created_at::date BETWEEN %s AND %s
+                  AND latest.stage NOT IN ('cancelled', 'deleted')
+                GROUP BY month
+                ORDER BY month
+                """,
+                (date_from, date_to),
+            ).fetchall()
             due_tasks = connection.execute(
                 """
                 WITH latest_requests AS (
@@ -749,6 +784,7 @@ class CollaborationRepository:
             ).fetchall()
         return {
             "stage_counts": stage_counts,
+            "monthly_voc_counts": monthly_voc_counts,
             "due_tasks": due_tasks,
             "recent_requests": recent_requests,
             "active_requests": active_requests,

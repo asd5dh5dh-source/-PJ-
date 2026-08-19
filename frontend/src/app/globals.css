@@ -110,6 +110,18 @@ td small { display: block; margin-top: 3px; color: #667085; }
 .dashboard-panel li:first-child { padding-top: 0; border-top: 0; }
 .dashboard-panel li strong { color: #005eb8; }
 .dashboard-panel li span, .dashboard-panel li small, .notification-list small { color: #667085; font-size: 12px; }
+.monthly-voc-panel { grid-column: 1 / -1; }
+.chart-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.chart-heading span { color: #667085; font-size: 12px; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 12px; margin: -4px 0 18px; }
+.chart-legend span { display: inline-flex; align-items: center; gap: 5px; color: #475467; font-size: 12px; }
+.chart-legend span::before { content: ""; width: 8px; height: 8px; border-radius: 999px; background: currentColor; }
+.complaint { color: #533afd; } .request { color: #2072d4; } .inquiry { color: #13a56d; }
+.monthly-voc-chart { min-height: 180px; display: flex; align-items: end; gap: 20px; padding: 12px 4px 0; border-bottom: 1px solid #e3e8ee; overflow-x: auto; }
+.monthly-voc-group { min-width: 76px; display: grid; gap: 8px; justify-items: center; }
+.monthly-voc-bars { width: 64px; height: 134px; display: flex; align-items: end; justify-content: center; gap: 6px; }
+.monthly-voc-bar { width: 14px; min-height: 2px; border-radius: 6px 6px 0 0; background: currentColor; }
+.monthly-voc-group small { color: #667085; font-size: 12px; white-space: nowrap; }
 .notification-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .notification-list { display: grid; gap: 12px; }
 .notification-list article { padding: 14px; border: 1px solid #dfe3eb; border-radius: 8px; }

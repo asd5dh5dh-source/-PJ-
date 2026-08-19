@@ -6,6 +6,10 @@ import DashboardPage from "./page";
 
 const dashboard = {
   stage_counts: [{ stage: "received", count: 2 }],
+  monthly_voc_counts: [
+    { month: "2026-07", complaint: 3, request: 2, inquiry: 1 },
+    { month: "2026-08", complaint: 2, request: 1, inquiry: 0 },
+  ],
   due_tasks: [{
     id: 4,
     case_id: "VOC-2026-0002",
@@ -45,6 +49,9 @@ describe("DashboardPage", () => {
     render(<DashboardPage />);
 
     expect(await screen.findByRole("heading", { name: "단계별 VOC 현황" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "월별 접수 VOC" })).toBeVisible();
+    expect(screen.getByLabelText("2026-07 Complaint 3건")).toBeVisible();
+    expect(screen.getByLabelText("2026-08 Inquiry 0건")).toBeVisible();
     expect(screen.getByRole("heading", { name: "마감 임박/지연 부서 과제" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "현재 진행 VOC" })).toBeVisible();
     expect(screen.getByText("Example Materials")).toBeVisible();

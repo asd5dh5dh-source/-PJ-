@@ -38,6 +38,12 @@ class OperationsRepository:
         self.dashboard_range = (date_from, date_to)
         return {
             "stage_counts": [{"stage": "received", "count": 2}],
+            "monthly_voc_counts": [{
+                "month": "2026-08",
+                "complaint": 2,
+                "request": 1,
+                "inquiry": 0,
+            }],
             "due_tasks": [{"id": 4, "status": "delayed"}],
             "recent_requests": [{"case_id": "VOC-2026-0002"}],
             "active_requests": [{
@@ -112,6 +118,12 @@ def test_dashboard_defaults_to_recent_thirty_days(client, repository):
     assert response.status_code == 200
     assert repository.dashboard_range == (date(2026, 7, 20), date(2026, 8, 18))
     assert response.json()["stage_counts"] == [{"stage": "received", "count": 2}]
+    assert response.json()["monthly_voc_counts"] == [{
+        "month": "2026-08",
+        "complaint": 2,
+        "request": 1,
+        "inquiry": 0,
+    }]
     assert response.json()["due_tasks"] == [{"id": 4, "status": "delayed"}]
     assert response.json()["recent_requests"] == [{"case_id": "VOC-2026-0002"}]
     assert response.json()["active_requests"] == [{
@@ -354,3 +366,51 @@ def test_dashboard_repository_counts_only_current_rounds_in_requested_window():
         date(2026, 8, 1) in params and date(2026, 8, 18) in params
         for _, params in connection.calls
     )
+
+
+def test_dashboard_repository_groups_initial_vocs_by_month_and_type():
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def fetchall(self):
+            return self.rows
+
+    class Connection:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, query, params=()):
+            normalized = " ".join(query.split())
+            self.calls.append((normalized, params))
+            if "lower(first_request.voc_type)" in normalized:
+                return Result([{
+                    "month": "2026-08",
+                    "complaint": 1,
+                    "request": 1,
+                    "inquiry": 1,
+                }])
+            return Result([])
+
+    connection = Connection()
+
+    @contextmanager
+    def connection_factory():
+        yield connection
+
+    payload = CollaborationRepository(connection_factory).dashboard(
+        date(2026, 8, 1), date(2026, 8, 31)
+    )
+
+    assert payload["monthly_voc_counts"] == [{
+        "month": "2026-08",
+        "complaint": 1,
+        "request": 1,
+        "inquiry": 1,
+    }]
+    monthly_query = next(
+        query
+        for query, _ in connection.calls
+        if "lower(first_request.voc_type)" in query
+    )
+    assert "FILTER ( WHERE lower(first_request.voc_type) = 'complaint' )" in monthly_query

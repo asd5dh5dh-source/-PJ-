@@ -53,6 +53,12 @@ export type DashboardPeriod = "30d" | "week" | "month";
 
 export type DashboardData = {
   stage_counts: Array<{ stage: VocStage; count: number }>;
+  monthly_voc_counts: Array<{
+    month: string;
+    complaint: number;
+    request: number;
+    inquiry: number;
+  }>;
   due_tasks: Array<{
     id: number;
     case_id?: string | null;

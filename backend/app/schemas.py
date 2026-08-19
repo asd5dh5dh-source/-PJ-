@@ -218,8 +218,16 @@ class DashboardActiveRequest(DashboardRecentRequest):
     responsible_departments: str | None = None
 
 
+class DashboardMonthlyVocCount(BaseModel):
+    month: str
+    complaint: int = Field(ge=0)
+    request: int = Field(ge=0)
+    inquiry: int = Field(ge=0)
+
+
 class DashboardResponse(BaseModel):
     stage_counts: list[DashboardStageCount]
+    monthly_voc_counts: list[DashboardMonthlyVocCount] = Field(default_factory=list)
     due_tasks: list[DashboardDueTask]
     recent_requests: list[DashboardRecentRequest]
     active_requests: list[DashboardActiveRequest]

@@ -67,6 +67,7 @@ export default function DashboardPanels() {
       </section>
       {error ? <p className="state-panel" role="alert">대시보드를 불러오지 못했습니다.</p> : !data ? <p className="state-panel" role="status">대시보드를 불러오는 중입니다.</p> : (
         <div className="dashboard-grid">
+          <MonthlyVocChart data={data.monthly_voc_counts ?? []} />
           <section className="dashboard-panel" aria-labelledby="stage-panel-heading">
             <h2 id="stage-panel-heading">단계별 VOC 현황</h2>
             {data.stage_counts.length ? <ul>{data.stage_counts.map((item) => <li key={item.stage}><span>{stageLabels[item.stage] ?? item.stage}</span><strong>{item.count}건</strong></li>)}</ul> : <p>해당 기간의 VOC가 없습니다.</p>}
@@ -82,5 +83,42 @@ export default function DashboardPanels() {
         </div>
       )}
     </>
+  );
+}
+
+const typeSeries = [
+  ["complaint", "Complaint", "complaint"],
+  ["request", "Request", "request"],
+  ["inquiry", "Inquiry", "inquiry"],
+] as const;
+
+function MonthlyVocChart({
+  data,
+}: {
+  data: DashboardData["monthly_voc_counts"];
+}) {
+  const maximum = Math.max(
+    1,
+    ...data.flatMap((item) => [item.complaint, item.request, item.inquiry]),
+  );
+
+  return (
+    <section className="dashboard-panel monthly-voc-panel" aria-labelledby="monthly-voc-heading">
+      <div className="chart-heading"><h2 id="monthly-voc-heading">월별 접수 VOC</h2><span>최초 접수 기준</span></div>
+      <div className="chart-legend" aria-label="VOC 유형 범례">
+        {typeSeries.map(([, label, className]) => <span key={label} className={className}>{label}</span>)}
+      </div>
+      {data.length ? <div className="monthly-voc-chart" role="img" aria-label="월별 VOC 유형별 접수 건수 그래프">
+        {data.map((item) => <div className="monthly-voc-group" key={item.month}>
+          <div className="monthly-voc-bars">
+            {typeSeries.map(([key, label, className]) => {
+              const value = item[key];
+              return <span key={key} className={`monthly-voc-bar ${className}`} style={{ height: `${(value / maximum) * 100}%` }} aria-label={`${item.month} ${label} ${value}건`} title={`${label} ${value}건`} />;
+            })}
+          </div>
+          <small>{item.month}</small>
+        </div>)}
+      </div> : <p>해당 기간의 월별 접수 VOC가 없습니다.</p>}
+    </section>
   );
 }
