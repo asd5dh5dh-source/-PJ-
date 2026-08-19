@@ -4,9 +4,13 @@ type TranslationPipeline = (
   text: string,
 ) => Promise<TranslationOutput | TranslationOutput[]>;
 
-const LOCAL_TRANSLATION_MODEL = "noticemkjung/opus-mt-tc-big-en-ko-ONNX";
+const LOCAL_TRANSLATION_MODEL = "TigreGotico/opus-mt-en-ko-onnx";
 export const LOCAL_TRANSLATION_TOKENIZER = "R4kSo1997/opus-mt-en-ko-onnx-int8";
-export const LOCAL_TRANSLATION_OPTIONS = { device: "wasm", dtype: "q4f16" } as const;
+export const LOCAL_TRANSLATION_OPTIONS = {
+  device: "wasm",
+  dtype: "fp32",
+  subfolder: "int8",
+} as const;
 
 let translatorPromise: Promise<TranslationPipeline> | undefined;
 
