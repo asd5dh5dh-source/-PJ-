@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -53,7 +53,21 @@ class OperationsRepository:
         return self.notifications
 
     def list_daily_notification_task_ids(self):
-        return []
+        return [5]
+
+    def get_notification_context(self, task_id, event):
+        return {
+            "id": task_id,
+            "voc_request_id": 2,
+            "case_id": "VOC-2026-0002",
+            "department": "Quality",
+            "priority": "normal",
+            "due_date": None,
+            "assignee_email": None,
+            "manager_email": None,
+            "weekday_time": time(9),
+            "timezone_name": "Asia/Seoul",
+        }
 
     def list_master_data(self, resource):
         return self.master[resource]
@@ -192,7 +206,9 @@ def test_notifications_are_public_read_only(client):
     response = client.get("/api/notifications")
 
     assert response.status_code == 200
-    assert response.json() == [{"id": 1, "delivery_status": "preview"}]
+    assert response.json()[0]["event_key"] == "assigned"
+    assert response.json()[0]["delivery_status"] == "preview"
+    assert response.json()[1] == {"id": 1, "delivery_status": "preview"}
 
 
 def test_daily_notification_processor_requires_writer_and_is_explicit_post(client):

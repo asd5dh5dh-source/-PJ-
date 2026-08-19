@@ -250,6 +250,9 @@ class ManagedNotificationRepository:
     def list_daily_notification_task_ids(self):
         return [self.context["id"]]
 
+    def list_notifications(self):
+        return list(self.logs.values())
+
     def claim_notification(self, values):
         key = values["dedupe_key"]
         if key in self.logs:
@@ -324,14 +327,39 @@ def test_daily_queue_uses_managed_weekday_schedule():
     assert queued[0]["dedupe_key"] == "task:9:scheduled:2026-08-18"
 
 
-def test_normal_priority_assignment_does_not_queue():
+def test_normal_priority_assignment_creates_an_immediate_preview():
     repository = ManagedNotificationRepository()
     repository.context["priority"] = "normal"
     service = NotificationService(
         repository, Settings(VOC_RUNTIME_PROFILE="external_review")
     )
 
-    assert service.queue_task(9, event="assigned") is None
+    result = service.queue_task(
+        9,
+        event="assigned",
+        now=datetime(2026, 8, 18, 12, tzinfo=ZoneInfo("Asia/Seoul")),
+    )
+
+    assert result["delivery_status"] == "preview"
+    assert result["dedupe_key"] == "task:9:assigned"
+
+
+def test_pending_previews_include_unlogged_assignment_notifications():
+    repository = ManagedNotificationRepository()
+    repository.context["priority"] = "normal"
+    service = NotificationService(
+        repository, Settings(VOC_RUNTIME_PROFILE="external_review")
+    )
+
+    previews = service.list_pending_previews(
+        now=datetime(2026, 8, 18, 12, tzinfo=ZoneInfo("Asia/Seoul"))
+    )
+
+    assert [preview["event_key"] for preview in previews] == [
+        "assigned",
+        "scheduled",
+    ]
+    assert all(preview["delivery_status"] == "preview" for preview in previews)
 
 
 def test_missing_managed_template_uses_safe_default_content():

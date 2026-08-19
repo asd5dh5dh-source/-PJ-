@@ -31,6 +31,79 @@ class NotificationService:
         event: str = "scheduled",
         now: datetime | None = None,
     ) -> dict[str, Any] | None:
+        values = self._notification_values(task, event, now)
+        if values is None:
+            return None
+
+        claim = getattr(self.repository, "claim_notification", None)
+        notification = (
+            claim(values) if claim is not None else self.repository.record_notification(values)
+        )
+        if notification is None:
+            return None
+        if self.settings.runtime_profile == "external_review":
+            self.preview_count += 1
+            return notification
+        if not self.settings.smtp_configured:
+            return notification
+        try:
+            self.send_mail(notification)
+        except Exception as error:
+            changes = {"delivery_status": "failed", "error_message": str(error)}
+        else:
+            changes = {
+                "delivery_status": "sent",
+                "real_delivery": True,
+                "sent_at": now or datetime.now(self.timezone),
+            }
+            self.sent_messages.append({**notification, **changes})
+        update = getattr(self.repository, "update_notification_delivery", None)
+        if update is not None:
+            return update(notification["id"], changes)
+        notification.update(changes)
+        return notification
+
+    def list_pending_previews(
+        self,
+        logs: list[Mapping[str, Any]] | None = None,
+        now: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        task_ids = getattr(self.repository, "list_daily_notification_task_ids", lambda: [])()
+        get_context = getattr(self.repository, "get_notification_context", None)
+        if get_context is None:
+            return []
+        known_keys = {
+            log.get("dedupe_key")
+            for log in logs or []
+            if log.get("dedupe_key")
+        }
+        previews = []
+        for task_id in task_ids:
+            for event in ("assigned", "scheduled"):
+                task = get_context(task_id, event)
+                values = (
+                    self._notification_values(task, event, now)
+                    if task is not None
+                    else None
+                )
+                if values is None or values["dedupe_key"] in known_keys:
+                    continue
+                event_offset = 1 if event == "assigned" else 2
+                previews.append(
+                    {
+                        "id": -(int(task_id) * 10 + event_offset),
+                        **values,
+                        "created_at": values["scheduled_at"],
+                    }
+                )
+        return previews
+
+    def _notification_values(
+        self,
+        task: Mapping[str, Any],
+        event: str,
+        now: datetime | None,
+    ) -> dict[str, Any] | None:
         timezone = ZoneInfo(task.get("timezone_name", self.timezone.key))
         weekday_time = task.get("weekday_time", self.weekday_time)
         now = now or datetime.now(timezone)
@@ -51,7 +124,7 @@ class NotificationService:
         dedupe_key = f"task:{task.get('id')}:{event}"
         if event == "scheduled":
             dedupe_key += f":{now.date().isoformat()}"
-        values = {
+        return {
             "voc_request_id": task.get("voc_request_id"),
             "task_id": task.get("id"),
             "event_key": event,
@@ -70,33 +143,6 @@ class NotificationService:
             "sent_at": None,
             "error_message": None,
         }
-        claim = getattr(self.repository, "claim_notification", None)
-        notification = (
-            claim(values) if claim is not None else self.repository.record_notification(values)
-        )
-        if notification is None:
-            return None
-        if self.settings.runtime_profile == "external_review":
-            self.preview_count += 1
-            return notification
-        if not self.settings.smtp_configured:
-            return notification
-        try:
-            self.send_mail(notification)
-        except Exception as error:
-            changes = {"delivery_status": "failed", "error_message": str(error)}
-        else:
-            changes = {
-                "delivery_status": "sent",
-                "real_delivery": True,
-                "sent_at": now,
-            }
-            self.sent_messages.append({**notification, **changes})
-        update = getattr(self.repository, "update_notification_delivery", None)
-        if update is not None:
-            return update(notification["id"], changes)
-        notification.update(changes)
-        return notification
 
     def queue_task(
         self,
@@ -120,10 +166,8 @@ class NotificationService:
 
     @staticmethod
     def _is_due(task: Mapping[str, Any], event: str, today: date) -> bool:
-        if event == "reopened":
+        if event in {"assigned", "reopened"}:
             return True
-        if event == "assigned":
-            return task.get("priority") == "high"
         if today.weekday() >= 5 or not task.get("due_date"):
             return False
         days = (task["due_date"] - today).days

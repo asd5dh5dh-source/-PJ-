@@ -41,7 +41,13 @@ def create_dashboard_router(
 
     @router.get("/notifications")
     def notifications():
-        return repository.list_notifications()
+        logs = repository.list_notifications()
+        previews = (
+            notification_service.list_pending_previews(logs)
+            if notification_service is not None
+            else []
+        )
+        return [*previews, *logs]
 
     @router.post("/notifications/process-daily")
     def process_daily_notifications(
