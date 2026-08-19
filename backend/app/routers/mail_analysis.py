@@ -17,11 +17,11 @@ _COMMON_MAIL_WORDS = {"please", "kindly", "dear", "regards", "thanks", "thank", 
 
 def _explicit_voc_subtype(raw_mail: str) -> str | None:
     match = re.search(
-        r"\[\s*(?:문의\s*/\s*)?요청\s*주제\s*[:：]\s*([^\]\n]+)\]",
+        r"(?:\[\s*(?:문의\s*/\s*)?요청\s*주제\s*[:：]\s*([^\]\n]+)\]|(?:件名|Subject)\s*[:：]\s*([^\n]+))",
         raw_mail,
         re.I,
     )
-    return " ".join(match.group(1).split()) if match else None
+    return " ".join(next(part for part in match.groups() if part is not None).split()) if match else None
 
 
 def _issue_keywords(raw_mail: str) -> list[str]:
@@ -52,10 +52,8 @@ def _request_summary(raw_mail: str) -> str:
 
 
 def _product_equipment(raw_mail: str, suggested: dict) -> str | None:
-    if suggested.get("product_equipment"):
-        return suggested["product_equipment"]
     match = re.search(r"\b(NCA|NCM\d*|NCMA|LFP|LMFP)\b", raw_mail, re.I)
-    return match.group(1).upper() if match else None
+    return match.group(1).upper() if match else suggested.get("product_equipment")
 
 
 def _departments(value: str | None) -> list[str]:

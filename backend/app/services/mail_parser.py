@@ -27,6 +27,14 @@ def parse_sender(raw_mail: str) -> dict[str, str | None]:
             if match:
                 company = match.group("company").strip(" .,-")
                 break
+    if company is None:
+        japanese_match = re.search(
+            r"(?P<company>[A-Za-z0-9][A-Za-z0-9 .&()/-]{1,60}?)の[^、\n]{0,24}(?:担当|責任者)[、,]\s*(?P<name>[\u4e00-\u9fff々]{1,8})です",
+            raw_mail,
+        )
+        if japanese_match:
+            company = japanese_match.group("company").strip(" .,-")
+            sender_name = sender_name or japanese_match.group("name")
     return {
         "sender_name": sender_name.strip() or None,
         "sender_email": sender_email.strip() or None,

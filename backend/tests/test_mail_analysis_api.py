@@ -37,6 +37,20 @@ class ArchiveRepository:
                 "record_origin": "historical",
                 "received_at": date(2026, 1, 2),
             },
+            {
+                "case_id": "COM-003",
+                "customer_name": "Missbusy",
+                "customer_request": "Investigate packing damage and containment action",
+                "original_mail_body": "Packing Damage LFP lot containment action.",
+                "voc_type": "Complaint",
+                "voc_subtype": "Packing Damage",
+                "product_equipment": "LFP",
+                "priority": "High",
+                "responsible_departments": "Quality",
+                "final_status": "closed",
+                "record_origin": "historical",
+                "received_at": date(2026, 1, 3),
+            },
         ]
         return [
             case for case in cases
@@ -122,3 +136,23 @@ LFP Lot을 적용한 셀 평가에서 저전압 및 성능 편차가 확인되�
     payload = response.json()
     assert mail_analysis._explicit_voc_subtype("[문의/요청 주제: Impurity Control]") == "Impurity Control"
     assert payload["suggested_voc_subtype"] == "Impurity Control"
+
+
+def test_mail_analysis_extracts_japanese_sender_topic_and_product():
+    client = TestClient(create_app(ArchiveRepository(), collaboration_repository=CollaborationRepository()))
+
+    response = client.post(
+        "/api/mail-analysis",
+        json={"original_mail_body": """お世話になっております。Missbusyの受入品質担当、田中です。
+
+件名：Packing Damage
+納入されたLFP Lotを使用したセル評価で性能のばらつきが確認されました。
+影響範囲、隔離・出荷保留の暫定措置、原因分析および再発防止計画をご提出ください。"""},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sender_name"] == "田中"
+    assert payload["sender_company"] == "Missbusy"
+    assert payload["suggested_voc_subtype"] == "Packing Damage"
+    assert payload["suggested_product_equipment"] == "LFP"
